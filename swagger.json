@@ -15,7 +15,7 @@
       "description": "Local Development"
     },
     {
-      "url": "https://api.gobt.com/api",
+      "url": "http://13.232.73.121/api-docs/api",
       "description": "Production"
     }
   ],
