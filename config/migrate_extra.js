@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: '../.env' });
 const { getPool } = require('./db');
 
 const migrateExtra = async () => {
