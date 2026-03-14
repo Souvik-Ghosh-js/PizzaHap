@@ -18,7 +18,7 @@ setupSwagger(app);
 const PORT = process.env.PORT || 5000;
 
 // ─── ENSURE DIRS ─────────────────────────────────────────────────
-['uploads', 'logs'].forEach(dir => {
+['uploads', 'uploads/products', 'logs'].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -54,7 +54,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan('combined', { stream: { write: msg => logger.info(msg.trim()) } }));
 
 // ─── STATIC FILES ─────────────────────────────────────────────────
-app.use('/uploads', express.static(path.join(__dirname, 'uploads'), { maxAge: '7d' }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ─── HEALTH CHECK ─────────────────────────────────────────────────
 app.get('/health', async (req, res) => {

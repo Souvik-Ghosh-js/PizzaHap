@@ -44,7 +44,8 @@ const authenticateAdmin = async (req, res, next) => {
     const admin = result[0];
     if (!admin.is_active) return forbidden(res, 'Admin account deactivated');
 
-    req.admin = admin;
+    // Use location_id from JWT token (set at login time, may be overridden for super_admin)
+    req.admin = { ...admin, location_id: decoded.location_id || admin.location_id || null };
     next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') return unauthorized(res, 'Token expired');

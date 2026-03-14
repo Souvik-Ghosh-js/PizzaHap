@@ -1,14 +1,13 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const path = require('path');
+const fs = require('fs');
 const { query } = require('../config/db');
 const { success, created, badRequest, notFound, paginated, unauthorized } = require('../utils/response');
 
-const toNum = (v) => parseFloat(v) || 0;
-
-// POST /admin/auth/login
 const adminLogin = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, location_id } = req.body;
     const result = await query(`SELECT * FROM Admins WHERE email = ? AND is_active = 1`, [email]);
     if (!result.length) return unauthorized(res, 'Invalid credentials');
     const admin = result[0];
@@ -16,94 +15,87 @@ const adminLogin = async (req, res, next) => {
     const isMatch = await bcrypt.compare(password, admin.password_hash);
     if (!isMatch) return unauthorized(res, 'Invalid credentials');
 
+    let resolvedLocationId = admin.location_id;
+    if (admin.role === 'super_admin' && location_id) {
+      resolvedLocationId = parseInt(location_id);
+    }
+
     await query(`UPDATE Admins SET last_login = NOW() WHERE id = ?`, [admin.id]);
 
     const token = jwt.sign(
-      { id: admin.id, type: 'admin', role: admin.role, location_id: admin.location_id },
+      { id: admin.id, type: 'admin', role: admin.role, location_id: resolvedLocationId },
       process.env.JWT_SECRET,
       { expiresIn: '12h' }
     );
 
     const { password_hash, ...adminData } = admin;
-    // Include location info
-    if (admin.location_id) {
-      const loc = await query(`SELECT * FROM Locations WHERE id = ?`, [admin.location_id]);
-      adminData.location = loc[0] || null;
-    }
-    return success(res, { admin: adminData, token });
+    return success(res, { admin: { ...adminData, location_id: resolvedLocationId }, token });
   } catch (err) { next(err); }
 };
 
-// GET /admin/dashboard
 const getDashboard = async (req, res, next) => {
   try {
-    // Scope to admin's location if not super_admin
-    const locationId = req.admin.role !== 'super_admin' ? req.admin.location_id : null;
-    const locFilter = locationId ? 'AND location_id = ?' : '';
-    const locParam = locationId ? [locationId] : [];
+    const locationId = req.admin.location_id;
+    const locWhere = locationId ? ` AND o.location_id = ${parseInt(locationId)}` : '';
+    const locWhereSimple = locationId ? ` AND location_id = ${parseInt(locationId)}` : '';
 
     const [todayOrders, totalRevenue, newUsers, pendingOrders, popularProducts] = await Promise.all([
-      query(`SELECT COUNT(*) as count, IFNULL(SUM(total_amount),0) as revenue
-             FROM Orders WHERE DATE(created_at) = CURDATE() AND payment_status = 'paid' ${locFilter}`, locParam),
-      query(`SELECT IFNULL(SUM(total_amount),0) as total FROM Orders WHERE payment_status = 'paid' ${locFilter}`, locParam),
+      query(`SELECT COUNT(*) as count, IFNULL(SUM(total_amount),0) as revenue FROM Orders o WHERE DATE(created_at) = CURDATE() AND payment_status = 'paid'${locWhereSimple}`),
+      query(`SELECT IFNULL(SUM(total_amount),0) as total FROM Orders o WHERE payment_status = 'paid'${locWhereSimple}`),
       query(`SELECT COUNT(*) as count FROM Users WHERE DATE(created_at) = CURDATE()`),
-      query(`SELECT COUNT(*) as count FROM Orders WHERE status IN ('pending','confirmed','preparing') ${locFilter}`, locParam),
+      query(`SELECT COUNT(*) as count FROM Orders o WHERE status IN ('pending','confirmed','preparing')${locWhereSimple}`),
       query(`SELECT p.name, p.image_url, COUNT(oi.id) as order_count, SUM(oi.total_price) as revenue
-             FROM OrderItems oi JOIN Products p ON oi.product_id = p.id
-             JOIN Orders o ON oi.order_id = o.id AND o.payment_status = 'paid' ${locationId ? 'AND o.location_id = ?' : ''}
-             GROUP BY p.id, p.name, p.image_url ORDER BY order_count DESC LIMIT 5`, locParam),
+        FROM OrderItems oi JOIN Products p ON oi.product_id = p.id
+        JOIN Orders o ON oi.order_id = o.id AND o.payment_status = 'paid'${locWhere}
+        GROUP BY p.id, p.name, p.image_url ORDER BY order_count DESC LIMIT 5`),
     ]);
 
     return success(res, {
-      today: { orders: todayOrders[0].count, revenue: toNum(todayOrders[0].revenue) },
-      total_revenue: toNum(totalRevenue[0].total),
+      today: { orders: todayOrders[0].count, revenue: todayOrders[0].revenue },
+      total_revenue: totalRevenue[0].total,
       new_users_today: newUsers[0].count,
       pending_orders: pendingOrders[0].count,
       popular_products: popularProducts,
+      location_id: locationId || null,
     });
   } catch (err) { next(err); }
 };
 
-// GET /admin/dashboard/reports
 const getReports = async (req, res, next) => {
   try {
     const { period = 'daily' } = req.query;
-    const locationId = req.admin.role !== 'super_admin' ? req.admin.location_id : null;
-    const locFilter = locationId ? 'AND location_id = ?' : '';
-    const locParam = locationId ? [locationId] : [];
-
+    const locationId = req.admin.location_id;
+    const locFilter = locationId ? ` AND location_id = ${parseInt(locationId)}` : '';
     let groupBy;
     if (period === 'daily') groupBy = `DATE(created_at)`;
     else if (period === 'weekly') groupBy = `WEEK(created_at)`;
     else groupBy = `DATE_FORMAT(created_at, '%Y-%m')`;
 
-    const result = await query(
-      `SELECT ${groupBy} as period,
-              COUNT(*) as total_orders,
-              IFNULL(SUM(total_amount),0) as revenue,
-              COUNT(CASE WHEN status = 'delivered' THEN 1 END) as delivered,
-              COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled
-       FROM Orders
-       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) ${locFilter}
-       GROUP BY ${groupBy} ORDER BY period DESC`,
-      locParam
-    );
+    const result = await query(`
+      SELECT ${groupBy} as period,
+             COUNT(*) as total_orders,
+             IFNULL(SUM(total_amount),0) as revenue,
+             COUNT(CASE WHEN status = 'delivered' THEN 1 END) as delivered,
+             COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled
+      FROM Orders
+      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)${locFilter}
+      GROUP BY ${groupBy}
+      ORDER BY period DESC
+    `);
     return success(res, result);
   } catch (err) { next(err); }
 };
 
-// GET /admin/orders
 const adminGetOrders = async (req, res, next) => {
   try {
     const { status } = req.query;
-    const page  = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
 
-    // Scope by admin's location
-    const adminLocationId = req.admin.role !== 'super_admin' ? req.admin.location_id : null;
-    const requestedLocationId = req.query.location_id ? parseInt(req.query.location_id) : null;
-    const effectiveLocationId = adminLocationId || requestedLocationId;
+    const adminLocationId = req.admin.location_id;
+    const queryLocationId = req.query.location_id ? parseInt(req.query.location_id) : null;
+    const effectiveLocationId = adminLocationId || queryLocationId;
 
     let whereClause = 'WHERE 1=1';
     const params = [];
@@ -112,8 +104,7 @@ const adminGetOrders = async (req, res, next) => {
 
     const countRes = await query(`SELECT COUNT(*) as total FROM Orders o ${whereClause}`, params);
     const result = await query(
-      `SELECT o.*, u.name as user_name, u.mobile as user_mobile, u.email as user_email,
-              l.name as location_name
+      `SELECT o.*, u.name as user_name, u.mobile as user_mobile, l.name as location_name
        FROM Orders o
        LEFT JOIN Users u ON o.user_id = u.id
        LEFT JOIN Locations l ON o.location_id = l.id
@@ -124,7 +115,6 @@ const adminGetOrders = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// PUT /admin/orders/:id/status
 const updateOrderStatus = async (req, res, next) => {
   try {
     const { status, note } = req.body;
@@ -144,22 +134,19 @@ const updateOrderStatus = async (req, res, next) => {
     }
     await query(`UPDATE Orders SET status = ?, updated_at = NOW() WHERE id = ?`, [status, req.params.id]);
     await query(
-      `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
-       VALUES (?, ?, ?, ?, 'admin')`,
+      `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role) VALUES (?, ?, ?, ?, 'admin')`,
       [req.params.id, status, note || '', req.admin.id]
     );
     return success(res, {}, 'Order status updated');
   } catch (err) { next(err); }
 };
 
-// GET /admin/users
 const adminGetUsers = async (req, res, next) => {
   try {
     const { search, is_blocked } = req.query;
-    const page  = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
-
     let whereClause = 'WHERE 1=1';
     const params = [];
     if (search) {
@@ -180,7 +167,6 @@ const adminGetUsers = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// PUT /admin/users/:id/block
 const blockUser = async (req, res, next) => {
   try {
     const { is_blocked } = req.body;
@@ -189,21 +175,19 @@ const blockUser = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// POST /admin/menu/products
 const createProduct = async (req, res, next) => {
   try {
     const { category_id, name, description, base_price, is_veg, is_featured, sizes } = req.body;
     const result = await query(
-      `INSERT INTO Products (category_id, name, description, base_price, is_veg, is_featured)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [category_id, name, description || null, toNum(base_price).toFixed(2), is_veg ? 1 : 0, is_featured ? 1 : 0]
+      `INSERT INTO Products (category_id, name, description, base_price, is_veg, is_featured) VALUES (?, ?, ?, ?, ?, ?)`,
+      [category_id, name, description || null, parseFloat(base_price), is_veg ? 1 : 0, is_featured ? 1 : 0]
     );
     const productId = result.insertId;
     if (sizes && sizes.length) {
       for (const size of sizes) {
         await query(
           `INSERT INTO ProductSizes (product_id, size_name, size_code, price) VALUES (?, ?, ?, ?)`,
-          [productId, size.size_name, size.size_code || size.size_name[0], toNum(size.price).toFixed(2)]
+          [productId, size.size_name, size.size_code, parseFloat(size.price)]
         );
       }
     }
@@ -211,7 +195,6 @@ const createProduct = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// PUT /admin/menu/products/:id
 const updateProduct = async (req, res, next) => {
   try {
     const { name, description, base_price, is_veg, is_featured, is_available } = req.body;
@@ -227,7 +210,7 @@ const updateProduct = async (req, res, next) => {
        WHERE id = ?`,
       [
         name || null, description || null,
-        base_price != null ? toNum(base_price).toFixed(2) : null,
+        base_price ? parseFloat(base_price) : null,
         is_veg !== undefined ? (is_veg ? 1 : 0) : null,
         is_featured !== undefined ? (is_featured ? 1 : 0) : null,
         is_available !== undefined ? (is_available ? 1 : 0) : null,
@@ -238,7 +221,24 @@ const updateProduct = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// DELETE /admin/menu/products/:id
+const uploadProductImage = async (req, res, next) => {
+  try {
+    if (!req.file) return badRequest(res, 'No image file provided');
+    const productId = req.params.id;
+    const product = await query(`SELECT id, image_url FROM Products WHERE id = ?`, [productId]);
+    if (!product.length) return notFound(res, 'Product not found');
+
+    if (product[0].image_url) {
+      const oldPath = path.join(__dirname, '..', product[0].image_url.replace(/^\//, ''));
+      if (fs.existsSync(oldPath)) { try { fs.unlinkSync(oldPath); } catch (_) {} }
+    }
+
+    const imageUrl = `/uploads/products/${req.file.filename}`;
+    await query(`UPDATE Products SET image_url = ?, updated_at = NOW() WHERE id = ?`, [imageUrl, productId]);
+    return success(res, { image_url: `${process.env.BASE_URL || 'http://13.232.73.121'}${imageUrl}` }, 'Image uploaded successfully');
+  } catch (err) { next(err); }
+};
+
 const deleteProduct = async (req, res, next) => {
   try {
     await query(`UPDATE Products SET is_available = 0 WHERE id = ?`, [req.params.id]);
@@ -246,29 +246,29 @@ const deleteProduct = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// POST /admin/coupons
-const createCoupon = async (req, res, next) => {
+const setProductLocationAvailability = async (req, res, next) => {
   try {
-    const { code, description, discount_type, discount_value, min_order_value,
-            max_discount, usage_limit, valid_from, valid_until } = req.body;
-    await query(
-      `INSERT INTO Coupons (code, description, discount_type, discount_value,
-         min_order_value, max_discount, usage_limit, valid_from, valid_until)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [code.toUpperCase(), description, discount_type,
-       toNum(discount_value).toFixed(2), toNum(min_order_value).toFixed(2),
-       max_discount != null ? toNum(max_discount).toFixed(2) : null,
-       usage_limit || null, new Date(valid_from), new Date(valid_until)]
-    );
-    return created(res, {}, 'Coupon created');
+    const { is_available } = req.body;
+    const productId = parseInt(req.params.id);
+    const locationId = req.admin.location_id || parseInt(req.body.location_id);
+    if (!locationId) return badRequest(res, 'Location ID required');
+    await query(`
+      INSERT INTO ProductLocationAvailability (product_id, location_id, is_available)
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE is_available = VALUES(is_available), updated_at = NOW()
+    `, [productId, locationId, is_available ? 1 : 0]);
+    return success(res, {}, `Product ${is_available ? 'enabled' : 'disabled'} for this location`);
   } catch (err) { next(err); }
 };
 
-// GET /admin/locations — all locations (for admin to pick theirs)
-const getAdminLocations = async (req, res, next) => {
+const createCoupon = async (req, res, next) => {
   try {
-    const result = await query(`SELECT * FROM Locations WHERE is_active = 1 ORDER BY name`);
-    return success(res, result);
+    const { code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, valid_from, valid_until } = req.body;
+    await query(
+      `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, valid_from, valid_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [code.toUpperCase(), description, discount_type, discount_value, min_order_value || 0, max_discount || null, usage_limit || null, new Date(valid_from), new Date(valid_until)]
+    );
+    return created(res, {}, 'Coupon created');
   } catch (err) { next(err); }
 };
 
@@ -276,6 +276,7 @@ module.exports = {
   adminLogin, getDashboard, getReports,
   adminGetOrders, updateOrderStatus,
   adminGetUsers, blockUser,
-  createProduct, updateProduct, deleteProduct,
-  createCoupon, getAdminLocations,
+  createProduct, updateProduct, deleteProduct, uploadProductImage,
+  setProductLocationAvailability,
+  createCoupon,
 };
