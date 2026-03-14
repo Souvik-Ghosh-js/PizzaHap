@@ -177,19 +177,23 @@ const placeOrder = async (req, res, next) => {
 
 const getMyOrders = async (req, res, next) => {
   try {
-    const { status, page = 1, limit = 10 } = req.query;
+    const { status } = req.query;
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
     const offset = (page - 1) * limit;
+
     let whereClause = `WHERE o.user_id = ?`;
     const params = [req.user.id];
 
     if (status) { whereClause += ` AND o.status = ?`; params.push(status); }
 
     const countRes = await query(`SELECT COUNT(*) as total FROM Orders o ${whereClause}`, params);
+
     const result = await query(
       `SELECT o.*, l.name as location_name FROM Orders o
        LEFT JOIN Locations l ON o.location_id = l.id
-       ${whereClause} ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
-      [...params, parseInt(limit), offset]
+       ${whereClause} ORDER BY o.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
     return paginated(res, result, countRes[0].total, page, limit);
   } catch (err) { next(err); }

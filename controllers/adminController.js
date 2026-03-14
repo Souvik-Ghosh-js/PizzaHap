@@ -3,14 +3,10 @@ const jwt = require('jsonwebtoken');
 const { query } = require('../config/db');
 const { success, created, badRequest, notFound, paginated, unauthorized, conflict } = require('../utils/response');
 
-// POST /admin/auth/login
 const adminLogin = async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    const result = await query(
-      `SELECT * FROM Admins WHERE email = ? AND is_active = 1`,
-      [email]
-    );
+    const result = await query(`SELECT * FROM Admins WHERE email = ? AND is_active = 1`, [email]);
     if (!result.length) return unauthorized(res, 'Invalid credentials');
     const admin = result[0];
 
@@ -30,7 +26,6 @@ const adminLogin = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// GET /admin/dashboard
 const getDashboard = async (req, res, next) => {
   try {
     const [todayOrders, totalRevenue, newUsers, pendingOrders, popularProducts] = await Promise.all([
@@ -48,10 +43,7 @@ const getDashboard = async (req, res, next) => {
     ]);
 
     return success(res, {
-      today: {
-        orders: todayOrders[0].count,
-        revenue: todayOrders[0].revenue,
-      },
+      today: { orders: todayOrders[0].count, revenue: todayOrders[0].revenue },
       total_revenue: totalRevenue[0].total,
       new_users_today: newUsers[0].count,
       pending_orders: pendingOrders[0].count,
@@ -60,7 +52,6 @@ const getDashboard = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// GET /admin/dashboard/reports?period=daily|weekly|monthly
 const getReports = async (req, res, next) => {
   try {
     const { period = 'daily' } = req.query;
@@ -84,11 +75,13 @@ const getReports = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// GET /admin/orders
 const adminGetOrders = async (req, res, next) => {
   try {
-    const { status, location_id, page = 1, limit = 20 } = req.query;
+    const { status, location_id } = req.query;
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
+
     let whereClause = 'WHERE 1=1';
     const params = [];
     if (status) { whereClause += ' AND o.status = ?'; params.push(status); }
@@ -102,14 +95,13 @@ const adminGetOrders = async (req, res, next) => {
        LEFT JOIN Locations l ON o.location_id = l.id
        ${whereClause}
        ORDER BY o.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [...params, parseInt(limit), offset]
+       LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
     return paginated(res, result, countRes[0].total, page, limit);
   } catch (err) { next(err); }
 };
 
-// PUT /admin/orders/:id/status
 const updateOrderStatus = async (req, res, next) => {
   try {
     const { status, note } = req.body;
@@ -130,10 +122,7 @@ const updateOrderStatus = async (req, res, next) => {
       return badRequest(res, `Cannot transition from '${current}' to '${status}'`);
     }
 
-    await query(
-      `UPDATE Orders SET status = ?, updated_at = NOW() WHERE id = ?`,
-      [status, req.params.id]
-    );
+    await query(`UPDATE Orders SET status = ?, updated_at = NOW() WHERE id = ?`, [status, req.params.id]);
     await query(
       `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
        VALUES (?, ?, ?, ?, 'admin')`,
@@ -143,11 +132,13 @@ const updateOrderStatus = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// GET /admin/users
 const adminGetUsers = async (req, res, next) => {
   try {
-    const { search, is_blocked, page = 1, limit = 20 } = req.query;
+    const { search, is_blocked } = req.query;
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
+
     let whereClause = 'WHERE 1=1';
     const params = [];
     if (search) {
@@ -158,31 +149,27 @@ const adminGetUsers = async (req, res, next) => {
       whereClause += ` AND is_blocked = ?`;
       params.push(is_blocked === 'true' ? 1 : 0);
     }
+
     const countRes = await query(`SELECT COUNT(*) as total FROM Users ${whereClause}`, params);
     const result = await query(
       `SELECT id, name, email, mobile, is_verified, is_active, is_blocked, created_at, last_login
        FROM Users ${whereClause}
        ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`,
-      [...params, parseInt(limit), offset]
+       LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
     return paginated(res, result, countRes[0].total, page, limit);
   } catch (err) { next(err); }
 };
 
-// PUT /admin/users/:id/block
 const blockUser = async (req, res, next) => {
   try {
     const { is_blocked } = req.body;
-    await query(
-      `UPDATE Users SET is_blocked = ? WHERE id = ?`,
-      [is_blocked ? 1 : 0, req.params.id]
-    );
+    await query(`UPDATE Users SET is_blocked = ? WHERE id = ?`, [is_blocked ? 1 : 0, req.params.id]);
     return success(res, {}, `User ${is_blocked ? 'blocked' : 'unblocked'} successfully`);
   } catch (err) { next(err); }
 };
 
-// POST /admin/menu/products
 const createProduct = async (req, res, next) => {
   try {
     const { category_id, name, description, base_price, is_veg, is_featured, sizes } = req.body;
@@ -201,12 +188,10 @@ const createProduct = async (req, res, next) => {
         );
       }
     }
-
     return created(res, { product_id: productId }, 'Product created');
   } catch (err) { next(err); }
 };
 
-// PUT /admin/menu/products/:id
 const updateProduct = async (req, res, next) => {
   try {
     const { name, description, base_price, is_veg, is_featured, is_available } = req.body;
@@ -234,7 +219,6 @@ const updateProduct = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// DELETE /admin/menu/products/:id
 const deleteProduct = async (req, res, next) => {
   try {
     await query(`UPDATE Products SET is_available = 0 WHERE id = ?`, [req.params.id]);
@@ -242,7 +226,6 @@ const deleteProduct = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// POST /admin/coupons
 const createCoupon = async (req, res, next) => {
   try {
     const { code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, valid_from, valid_until } = req.body;

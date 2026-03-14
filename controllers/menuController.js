@@ -11,8 +11,8 @@ const getCategories = async (req, res, next) => {
 const getProducts = async (req, res, next) => {
   try {
     const { category_id, is_veg, search } = req.query;
-    const page   = parseInt(req.query.page)  || 1;
-    const limit  = parseInt(req.query.limit) || 20;
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
 
     let whereClause = `WHERE p.is_available = 1`;
@@ -37,12 +37,16 @@ const getProducts = async (req, res, next) => {
     );
     const total = countResult[0].total;
 
+    // LIMIT and OFFSET are interpolated directly as integers — NOT as ? params.
+    // mysql2's execute() (prepared statements) rejects ? placeholders for
+    // LIMIT/OFFSET in some versions. Interpolation is safe here because both
+    // values are produced by parseInt() + Math.max/min above, never raw user input.
     const result = await query(
       `SELECT p.*, c.name as category_name
        FROM Products p LEFT JOIN Categories c ON p.category_id = c.id
        ${whereClause} ORDER BY p.sort_order, p.name
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+       LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
     return paginated(res, result, total, page, limit);
   } catch (err) { next(err); }
