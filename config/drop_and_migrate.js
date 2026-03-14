@@ -9,8 +9,11 @@ const run = async () => {
   await conn.execute('SET FOREIGN_KEY_CHECKS = 0');
 
   const [tables] = await conn.execute(
-    `SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()`
-  );
+  `SELECT table_name 
+   FROM information_schema.tables 
+   WHERE table_schema = ?`,
+  [process.env.DB_NAME]
+);
   for (const { table_name } of tables) {
     await conn.execute(`DROP TABLE IF EXISTS \`${table_name}\``);
     console.log(`   Dropped: ${table_name}`);
