@@ -3,7 +3,9 @@ const { success, notFound, paginated } = require('../utils/response');
 
 const getCategories = async (req, res, next) => {
   try {
-    const result = await query(`SELECT * FROM Categories WHERE is_active = 1 ORDER BY sort_order`);
+    const result = await query(
+      `SELECT * FROM Categories WHERE is_active = 1 ORDER BY sort_order`
+    );
     return success(res, result);
   } catch (err) { next(err); }
 };
@@ -15,66 +17,75 @@ const getProducts = async (req, res, next) => {
     const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
 
-    let whereClause = `WHERE p.is_available = 1`;
+    let where  = `WHERE p.is_available = 1`;
     const params = [];
 
-    if (category_id) {
-      whereClause += ` AND p.category_id = ?`;
-      params.push(parseInt(category_id));
-    }
-    if (is_veg !== undefined) {
-      whereClause += ` AND p.is_veg = ?`;
-      params.push(is_veg === 'true' ? 1 : 0);
-    }
+    if (category_id) { where += ` AND p.category_id = ?`; params.push(parseInt(category_id)); }
+    if (is_veg !== undefined) { where += ` AND p.is_veg = ?`; params.push(is_veg === 'true' ? 1 : 0); }
     if (search) {
-      whereClause += ` AND (p.name LIKE ? OR p.description LIKE ?)`;
+      where += ` AND (p.name LIKE ? OR p.description LIKE ?)`;
       params.push(`%${search}%`, `%${search}%`);
     }
 
-    // Filter by location availability — if a row exists with is_available=0, exclude it
-    // If no row exists, product is available at all locations by default
+    /* Location filter: exclude products explicitly marked unavailable at this location.
+       Products with no row in ProductLocationAvailability are available everywhere. */
     let joinClause = '';
     if (location_id) {
-      joinClause = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${parseInt(location_id)}`;
-      whereClause += ` AND (pla.is_available IS NULL OR pla.is_available = 1)`;
+      const lid = parseInt(location_id);
+      joinClause = `LEFT JOIN ProductLocationAvailability pla
+                    ON pla.product_id = p.id AND pla.location_id = ${lid}`;
+      where += ` AND (pla.is_available IS NULL OR pla.is_available = 1)`;
     }
 
-    const countResult = await query(
-      `SELECT COUNT(*) as total FROM Products p ${joinClause} ${whereClause}`,
-      params
+    const countRes = await query(
+      `SELECT COUNT(*) as total FROM Products p ${joinClause} ${where}`, params
     );
-    const total = countResult[0].total;
-
-    const result = await query(
+    const rows = await query(
       `SELECT p.*, c.name as category_name,
-        COALESCE(pla.is_available, 1) as location_available
-       FROM Products p LEFT JOIN Categories c ON p.category_id = c.id
+              COALESCE(pla.is_available, 1) as location_available
+       FROM Products p
+       LEFT JOIN Categories c ON p.category_id = c.id
        ${joinClause}
-       ${whereClause} ORDER BY p.sort_order, p.name
+       ${where}
+       ORDER BY p.sort_order, p.name
        LIMIT ${limit} OFFSET ${offset}`,
       params
     );
-    return paginated(res, result, total, page, limit);
+    return paginated(res, rows, countRes[0].total, page, limit);
   } catch (err) { next(err); }
 };
 
 const getProductById = async (req, res, next) => {
   try {
-    const productResult = await query(
+    const { location_id } = req.query;
+    const rows = await query(
       `SELECT p.*, c.name as category_name FROM Products p
        LEFT JOIN Categories c ON p.category_id = c.id
        WHERE p.id = ? AND p.is_available = 1`,
       [req.params.id]
     );
-    if (!productResult.length) return notFound(res, 'Product not found');
-    const product = productResult[0];
+    if (!rows.length) return notFound(res, 'Product not found');
+    const product = rows[0];
+
+    // Check location-specific availability
+    if (location_id) {
+      const avail = await query(
+        `SELECT is_available FROM ProductLocationAvailability
+         WHERE product_id = ? AND location_id = ?`,
+        [product.id, parseInt(location_id)]
+      );
+      if (avail.length && !avail[0].is_available) {
+        return notFound(res, 'Product not available at this location');
+      }
+    }
 
     const [sizes, crusts, toppings, ratings] = await Promise.all([
       query(`SELECT * FROM ProductSizes WHERE product_id = ? AND is_available = 1`, [product.id]),
       query(`SELECT * FROM CrustTypes WHERE is_available = 1 ORDER BY sort_order`),
       query(`SELECT * FROM Toppings WHERE is_available = 1 ORDER BY sort_order`),
       query(
-        `SELECT r.*, u.name as user_name FROM Ratings r LEFT JOIN Users u ON r.user_id = u.id
+        `SELECT r.*, u.name as user_name FROM Ratings r
+         LEFT JOIN Users u ON r.user_id = u.id
          WHERE r.product_id = ? AND r.is_approved = 1 ORDER BY r.created_at DESC`,
         [product.id]
       ),
@@ -86,7 +97,8 @@ const getProductById = async (req, res, next) => {
 
     return success(res, {
       ...product, sizes, crusts, toppings,
-      avg_rating: avgRating, review_count: ratings.length, reviews: ratings.slice(0, 5),
+      avg_rating: avgRating, review_count: ratings.length,
+      reviews: ratings.slice(0, 5),
     });
   } catch (err) { next(err); }
 };
@@ -97,38 +109,38 @@ const getFeaturedProducts = async (req, res, next) => {
     let joinClause = '';
     let whereExtra = '';
     if (location_id) {
-      joinClause = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${parseInt(location_id)}`;
+      const lid = parseInt(location_id);
+      joinClause = `LEFT JOIN ProductLocationAvailability pla
+                    ON pla.product_id = p.id AND pla.location_id = ${lid}`;
       whereExtra = ` AND (pla.is_available IS NULL OR pla.is_available = 1)`;
     }
-    const result = await query(
-      `SELECT p.*, c.name as category_name FROM Products p
+    const rows = await query(
+      `SELECT p.*, c.name as category_name
+       FROM Products p
        LEFT JOIN Categories c ON p.category_id = c.id
        ${joinClause}
        WHERE p.is_featured = 1 AND p.is_available = 1${whereExtra}
        ORDER BY p.sort_order LIMIT 10`
     );
-    return success(res, result);
+    return success(res, rows);
   } catch (err) { next(err); }
 };
 
 const getToppings = async (req, res, next) => {
   try {
     const { is_veg } = req.query;
-    let whereClause = 'WHERE is_available = 1';
+    let where = 'WHERE is_available = 1';
     const params = [];
-    if (is_veg !== undefined) {
-      whereClause += ' AND is_veg = ?';
-      params.push(is_veg === 'true' ? 1 : 0);
-    }
-    const result = await query(`SELECT * FROM Toppings ${whereClause} ORDER BY sort_order`, params);
-    return success(res, result);
+    if (is_veg !== undefined) { where += ' AND is_veg = ?'; params.push(is_veg === 'true' ? 1 : 0); }
+    const rows = await query(`SELECT * FROM Toppings ${where} ORDER BY sort_order`, params);
+    return success(res, rows);
   } catch (err) { next(err); }
 };
 
 const getCrusts = async (req, res, next) => {
   try {
-    const result = await query(`SELECT * FROM CrustTypes WHERE is_available = 1 ORDER BY sort_order`);
-    return success(res, result);
+    const rows = await query(`SELECT * FROM CrustTypes WHERE is_available = 1 ORDER BY sort_order`);
+    return success(res, rows);
   } catch (err) { next(err); }
 };
 

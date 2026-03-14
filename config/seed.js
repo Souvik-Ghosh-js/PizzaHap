@@ -1,112 +1,199 @@
 require('dotenv').config();
-const { getPool } = require('./db');
 const bcrypt = require('bcryptjs');
+const { getPool } = require('./db');
 
-const seed = async () => {
-  const pool = getPool();
-  console.log('🌱 Seeding database...');
+const run = async () => {
+  const pool = await getPool();
+  const conn = await pool.getConnection();
 
-  const locations = [
-    { name: 'GOBT Central', address: '12 MG Road, Bengaluru', city: 'Bengaluru', lat: 12.9716, lng: 77.5946 },
-    { name: 'GOBT Koramangala', address: '5th Block, Koramangala, Bengaluru', city: 'Bengaluru', lat: 12.9352, lng: 77.6245 },
-    { name: 'GOBT Whitefield', address: 'ITPL Main Road, Whitefield, Bengaluru', city: 'Bengaluru', lat: 12.9698, lng: 77.7499 },
-    { name: 'GOBT Indiranagar', address: '100 Feet Road, Indiranagar, Bengaluru', city: 'Bengaluru', lat: 12.9783, lng: 77.6408 },
-    { name: 'GOBT Jayanagar', address: '4th Block, Jayanagar, Bengaluru', city: 'Bengaluru', lat: 12.9279, lng: 77.5824 },
+  // ── Locations ──────────────────────────────────────────────────
+  console.log('🌍 Seeding locations...');
+  const locs = [
+    ['PizzaHap - Connaught Place', 'Block A, Connaught Place, New Delhi - 110001', 28.6315, 77.2167, '+91-11-23456789'],
+    ['PizzaHap - Bandra West',     '14 Turner Road, Bandra West, Mumbai - 400050',  19.0596, 72.8295, '+91-22-26440011'],
+    ['PizzaHap - Koramangala',     '80 Feet Road, Koramangala, Bangalore - 560034', 12.9279, 77.6271, '+91-80-41234567'],
+    ['PizzaHap - Salt Lake',       'Sector V, Salt Lake City, Kolkata - 700091',    22.5726, 88.4146, '+91-33-23210000'],
   ];
-  for (const loc of locations) {
-    await pool.execute(
-      `INSERT INTO Locations (name, address, city, latitude, longitude) SELECT ?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM Locations WHERE name = ?)`,
-      [loc.name, loc.address, loc.city, loc.lat, loc.lng, loc.name]
+  const locIds = [];
+  for (const [name, address, lat, lng, phone] of locs) {
+    const [r] = await conn.execute(
+      `INSERT INTO Locations (name, address, latitude, longitude, phone) VALUES (?,?,?,?,?)`,
+      [name, address, lat, lng, phone]
     );
+    locIds.push(r.insertId);
+    console.log(`   ${name} → id=${r.insertId}`);
   }
 
-  const categories = ['Veg Pizzas', 'Non-Veg Pizzas', 'Combos', 'Sides', 'Beverages', 'Desserts'];
-  for (let i = 0; i < categories.length; i++) {
-    await pool.execute(
-      `INSERT INTO Categories (name, sort_order) SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM Categories WHERE name = ?)`,
-      [categories[i], i, categories[i]]
-    );
-  }
+  // ── Admins ─────────────────────────────────────────────────────
+  console.log('\n👤 Seeding admins...');
+  const hash = await bcrypt.hash('Admin@123', 10);
+  const superHash = await bcrypt.hash('Super@123', 10);
 
-  const crusts = [
-    { name: 'Classic Hand Tossed', extra: 0 }, { name: 'Thin & Crispy', extra: 0 },
-    { name: 'Cheese Burst', extra: 80 }, { name: 'Wheat Thin Crust', extra: 30 },
-    { name: 'Fresh Pan Pizza', extra: 50 },
+  const admins = [
+    ['Super Admin',     'superadmin@pizzahap.com', superHash, 'super_admin', null],
+    ['CP Manager',      'admin.cp@pizzahap.com',   hash,      'admin',       locIds[0]],
+    ['Bandra Manager',  'admin.bandra@pizzahap.com', hash,    'admin',       locIds[1]],
+    ['Koramangala Mgr', 'admin.blr@pizzahap.com',  hash,      'admin',       locIds[2]],
+    ['Salt Lake Mgr',   'admin.kol@pizzahap.com',  hash,      'admin',       locIds[3]],
   ];
-  for (const crust of crusts) {
-    await pool.execute(
-      `INSERT INTO CrustTypes (name, extra_price) SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM CrustTypes WHERE name = ?)`,
-      [crust.name, crust.extra, crust.name]
+  for (const [name, email, pwd, role, locId] of admins) {
+    await conn.execute(
+      `INSERT INTO Admins (name, email, password_hash, role, location_id) VALUES (?,?,?,?,?)`,
+      [name, email, pwd, role, locId]
     );
+    console.log(`   ${email} (${role}, loc=${locId})`);
   }
 
-  const toppings = [
-    { name: 'Extra Cheese', price: 50, is_veg: 1 }, { name: 'Jalapenos', price: 30, is_veg: 1 },
-    { name: 'Black Olives', price: 30, is_veg: 1 }, { name: 'Mushrooms', price: 40, is_veg: 1 },
-    { name: 'Capsicum', price: 25, is_veg: 1 }, { name: 'Onion', price: 20, is_veg: 1 },
-    { name: 'Paneer', price: 60, is_veg: 1 }, { name: 'Chicken Tikka', price: 80, is_veg: 0 },
-    { name: 'Pepperoni', price: 90, is_veg: 0 }, { name: 'Grilled Chicken', price: 75, is_veg: 0 },
+  // ── Categories ─────────────────────────────────────────────────
+  console.log('\n📂 Seeding categories...');
+  const cats = [
+    ['Pizzas',        'Our signature hand-tossed pizzas', 1],
+    ['Pasta',         'Italian pasta dishes',              2],
+    ['Sides & Starters', 'Garlic bread, fries and more',  3],
+    ['Desserts',      'Sweet endings',                     4],
+    ['Beverages',     'Cold drinks, juices & more',        5],
   ];
-  for (const t of toppings) {
-    await pool.execute(
-      `INSERT INTO Toppings (name, price, is_veg) SELECT ?,?,? WHERE NOT EXISTS (SELECT 1 FROM Toppings WHERE name = ?)`,
-      [t.name, t.price, t.is_veg, t.name]
+  const catIds = [];
+  for (const [name, desc, order] of cats) {
+    const [r] = await conn.execute(
+      `INSERT INTO Categories (name, description, sort_order) VALUES (?,?,?)`,
+      [name, desc, order]
     );
+    catIds.push(r.insertId);
   }
+  console.log(`   ${cats.length} categories created`);
 
-  const [vegCat] = await pool.execute(`SELECT id FROM Categories WHERE name = 'Veg Pizzas'`);
-  const [nonVegCat] = await pool.execute(`SELECT id FROM Categories WHERE name = 'Non-Veg Pizzas'`);
-  const vegCatId = vegCat[0]?.id;
-  const nonVegCatId = nonVegCat[0]?.id;
-
+  // ── Products ────────────────────────────────────────────────────
+  console.log('\n🍕 Seeding products...');
   const products = [
-    { name: 'Margherita', desc: 'Classic delight with 100% real mozzarella cheese', base_price: 199, is_veg: 1, cat: vegCatId },
-    { name: 'Veggie Paradise', desc: 'Black olive, capsicum, red paprika, tomato', base_price: 249, is_veg: 1, cat: vegCatId },
-    { name: 'Paneer Makhani', desc: 'Golden corn, paneer, makhani sauce', base_price: 279, is_veg: 1, cat: vegCatId },
-    { name: 'Chicken Tikka', desc: 'Freshly made chicken tikka, onions, capsicum', base_price: 329, is_veg: 0, cat: nonVegCatId },
-    { name: 'Pepperoni Feast', desc: 'Extra pepperoni, extra cheese, spicy sauce', base_price: 349, is_veg: 0, cat: nonVegCatId },
+    // Pizzas
+    { cat: 0, name: 'Margherita',          desc: 'Classic tomato sauce with fresh mozzarella',                 price: 199, veg: 1, featured: 1 },
+    { cat: 0, name: 'Farmhouse',           desc: 'Capsicum, onion, mushroom, tomato',                          price: 249, veg: 1, featured: 1 },
+    { cat: 0, name: 'Paneer Tikka',        desc: 'Spicy paneer with bell peppers and onions',                  price: 279, veg: 1, featured: 0 },
+    { cat: 0, name: 'BBQ Chicken',         desc: 'Smoky BBQ sauce with grilled chicken',                       price: 299, veg: 0, featured: 1 },
+    { cat: 0, name: 'Chicken Tikka',       desc: 'Tandoori chicken with onion and capsicum',                   price: 289, veg: 0, featured: 0 },
+    { cat: 0, name: 'Pepperoni',           desc: 'Classic pepperoni with mozzarella',                          price: 319, veg: 0, featured: 1 },
+    { cat: 0, name: 'Veggie Supreme',      desc: 'Loaded with seven vegetables',                               price: 259, veg: 1, featured: 0 },
+    { cat: 0, name: 'Double Cheese',       desc: 'Extra mozzarella on classic sauce',                          price: 269, veg: 1, featured: 0 },
+    // Pasta
+    { cat: 1, name: 'Penne Arrabbiata',    desc: 'Spicy tomato sauce with penne',                              price: 179, veg: 1, featured: 0 },
+    { cat: 1, name: 'Chicken Alfredo',     desc: 'Creamy white sauce with grilled chicken',                    price: 229, veg: 0, featured: 0 },
+    { cat: 1, name: 'Mushroom Pesto',      desc: 'Basil pesto with mushrooms and parmesan',                    price: 199, veg: 1, featured: 0 },
+    // Sides
+    { cat: 2, name: 'Garlic Bread',        desc: 'Toasted bread with garlic butter',                           price:  99, veg: 1, featured: 0 },
+    { cat: 2, name: 'Potato Wedges',       desc: 'Seasoned crispy wedges with dip',                            price: 119, veg: 1, featured: 0 },
+    { cat: 2, name: 'Mozzarella Sticks',   desc: 'Crispy fried mozzarella with marinara',                      price: 149, veg: 1, featured: 0 },
+    // Desserts
+    { cat: 3, name: 'Choco Lava Cake',     desc: 'Warm chocolate cake with molten center',                     price: 129, veg: 1, featured: 0 },
+    { cat: 3, name: 'Tiramisu',            desc: 'Classic Italian coffee dessert',                             price: 149, veg: 1, featured: 0 },
+    // Beverages
+    { cat: 4, name: 'Coke (300ml)',        desc: 'Ice cold Coca-Cola',                                         price:  60, veg: 1, featured: 0 },
+    { cat: 4, name: 'Fresh Lime Soda',     desc: 'Sweet or salted',                                            price:  79, veg: 1, featured: 0 },
   ];
+  const prodIds = [];
   for (const p of products) {
-    const [existing] = await pool.execute(`SELECT id FROM Products WHERE name = ?`, [p.name]);
-    if (!existing.length) {
-      const [res] = await pool.execute(
-        `INSERT INTO Products (category_id, name, description, base_price, is_veg) VALUES (?,?,?,?,?)`,
-        [p.cat, p.name, p.desc, p.base_price, p.is_veg]
+    const [r] = await conn.execute(
+      `INSERT INTO Products (category_id, name, description, base_price, is_veg, is_featured) VALUES (?,?,?,?,?,?)`,
+      [catIds[p.cat], p.name, p.desc, p.price, p.veg, p.featured]
+    );
+    prodIds.push(r.insertId);
+  }
+  console.log(`   ${products.length} products created`);
+
+  // ── Product sizes (only for pizzas = first 8) ──────────────────
+  console.log('\n📏 Seeding product sizes...');
+  const sizeDefs = [
+    ['Regular', 'REG', 0],
+    ['Medium',  'MED', 70],
+    ['Large',   'LG',  130],
+  ];
+  for (let i = 0; i < 8; i++) {  // pizzas only
+    const pid = prodIds[i];
+    const base = products[i].price;
+    for (const [sname, scode, extra] of sizeDefs) {
+      await conn.execute(
+        `INSERT INTO ProductSizes (product_id, size_name, size_code, price) VALUES (?,?,?,?)`,
+        [pid, sname, scode, base + extra]
       );
-      const productId = res.insertId;
-      const sizes = [
-        { name: 'Small (7")', code: 'S', price: p.base_price },
-        { name: 'Medium (10")', code: 'M', price: p.base_price + 80 },
-        { name: 'Large (12")', code: 'L', price: p.base_price + 160 },
-      ];
-      for (const s of sizes) {
-        await pool.execute(`INSERT INTO ProductSizes (product_id, size_name, size_code, price) VALUES (?,?,?,?)`, [productId, s.name, s.code, s.price]);
-      }
     }
   }
+  // Non-pizza items get a single "Regular" size
+  for (let i = 8; i < products.length; i++) {
+    await conn.execute(
+      `INSERT INTO ProductSizes (product_id, size_name, size_code, price) VALUES (?,?,?,?)`,
+      [prodIds[i], 'Regular', 'REG', products[i].price]
+    );
+  }
+  console.log('   Sizes seeded');
 
-  const passwordHash = await bcrypt.hash('Admin@123', 12);
-  await pool.execute(
-    `INSERT INTO Admins (name, email, password_hash, role) SELECT ?,?,?,'super_admin' WHERE NOT EXISTS (SELECT 1 FROM Admins WHERE email = 'admin@gobt.com')`,
-    ['Super Admin', 'admin@gobt.com', passwordHash]
+  // ── Crust types ────────────────────────────────────────────────
+  console.log('\n🍞 Seeding crust types...');
+  const crusts = [
+    ['Classic Hand-Tossed', 0,  1],
+    ['Thin & Crispy',       0,  2],
+    ['Stuffed Crust',       50, 3],
+    ['Cheese Burst',        80, 4],
+  ];
+  for (const [name, extra, order] of crusts) {
+    await conn.execute(
+      `INSERT INTO CrustTypes (name, extra_price, sort_order) VALUES (?,?,?)`,
+      [name, extra, order]
+    );
+  }
+
+  // ── Toppings ───────────────────────────────────────────────────
+  console.log('\n🧅 Seeding toppings...');
+  const toppings = [
+    ['Extra Cheese',    30, 1, 1], ['Mushrooms',      25, 1, 2],
+    ['Olives',          20, 1, 3], ['Jalapeños',      20, 1, 4],
+    ['Onions',          15, 1, 5], ['Capsicum',       15, 1, 6],
+    ['Chicken Chunks',  40, 0, 7], ['Pepperoni',      45, 0, 8],
+  ];
+  for (const [name, price, veg, order] of toppings) {
+    await conn.execute(
+      `INSERT INTO Toppings (name, price, is_veg, sort_order) VALUES (?,?,?,?)`,
+      [name, price, veg, order]
+    );
+  }
+
+  // ── Location-specific availability (demonstrate the feature) ──
+  // Salt Lake branch doesn't carry Pepperoni or BBQ Chicken
+  console.log('\n📍 Seeding location-specific availability...');
+  const saltLakeId = locIds[3];
+  const bbqChickenId  = prodIds[3]; // BBQ Chicken
+  const pepperoniId   = prodIds[5]; // Pepperoni
+  await conn.execute(
+    `INSERT INTO ProductLocationAvailability (product_id, location_id, is_available) VALUES (?,?,0),(?,?,0)`,
+    [bbqChickenId, saltLakeId, pepperoniId, saltLakeId]
   );
+  console.log('   BBQ Chicken & Pepperoni marked unavailable at Salt Lake');
 
-  await pool.execute(
+  // ── Coupons ────────────────────────────────────────────────────
+  console.log('\n🎫 Seeding coupons...');
+  const now  = new Date();
+  const year = now.getFullYear() + 1;
+  await conn.execute(
     `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, valid_from, valid_until)
-     SELECT 'WELCOME50','Welcome offer - 50% off on first order','percentage',50,200,150,NOW(),DATE_ADD(NOW(), INTERVAL 1 YEAR)
-     WHERE NOT EXISTS (SELECT 1 FROM Coupons WHERE code = 'WELCOME50')`
-  );
-  await pool.execute(
-    `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, valid_from, valid_until)
-     SELECT 'FLAT100','Flat Rs.100 off on orders above Rs.500','flat',100,500,NOW(),DATE_ADD(NOW(), INTERVAL 1 YEAR)
-     WHERE NOT EXISTS (SELECT 1 FROM Coupons WHERE code = 'FLAT100')`
+     VALUES (?,?,?,?,?,?,?,?),
+            (?,?,?,?,?,?,?,?)`,
+    [
+      'WELCOME50', 'Welcome! Get ₹50 off on your first order', 'flat',       50, 199, null,
+        `${now.getFullYear()}-01-01 00:00:00`, `${year}-12-31 23:59:59`,
+      'PIZZA20',   '20% off on orders above ₹400',             'percentage', 20, 400, 150,
+        `${now.getFullYear()}-01-01 00:00:00`, `${year}-12-31 23:59:59`,
+    ]
   );
 
-  console.log('✅ Seed complete!');
+  conn.release();
+
+  console.log('\n✅ Seed complete!\n');
+  console.log('🔑 Admin credentials:');
+  console.log('   Super Admin : superadmin@pizzahap.com  / Super@123  (all locations)');
+  console.log('   CP Manager  : admin.cp@pizzahap.com    / Admin@123  (Connaught Place)');
+  console.log('   Bandra      : admin.bandra@pizzahap.com/ Admin@123  (Bandra West)');
+  console.log('   Bangalore   : admin.blr@pizzahap.com   / Admin@123  (Koramangala)');
+  console.log('   Kolkata     : admin.kol@pizzahap.com   / Admin@123  (Salt Lake)\n');
   process.exit(0);
 };
 
-seed().catch(err => {
-  console.error('❌ Seed failed:', err);
-  process.exit(1);
-});
+run().catch(e => { console.error('❌', e.message); process.exit(1); });

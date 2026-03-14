@@ -1,1427 +1,259 @@
 {
-  "openapi": "3.0.3",
+  "openapi": "3.0.0",
   "info": {
     "title": "PizzaHap API",
-    "description": "Complete REST API for PizzaHap pizza ordering system.\n\n## Authentication Flow\n1. `POST /auth/send-otp` — sends 6-digit OTP to email via Gmail/Nodemailer\n2. `POST /auth/register` (new users) or `POST /auth/login` (returning users) — verify OTP, receive `accessToken` + `refreshToken`\n3. Pass `Authorization: Bearer <accessToken>` on all protected routes\n4. Access token expires in 7 days (`JWT_EXPIRES_IN`). Refresh token lasts 30 days.\n5. Use `POST /auth/refresh-token` to rotate both tokens before expiry\n\n## Admin Authentication\n- `POST /admin/auth/login` with `email` + `password` → 12-hour admin JWT\n- Same `Authorization: Bearer <token>` header\n- Roles: `super_admin`, `admin`, `staff`\n\n## Response Envelope\nAll responses:\n```json\n{ \"success\": true|false, \"message\": \"...\", \"data\": {} }\n```\nPaginated responses also include:\n```json\n\"pagination\": { \"total\": 100, \"page\": 1, \"limit\": 20, \"totalPages\": 5, \"hasNext\": true, \"hasPrev\": false }\n```\n\n## Base URL\n`http://13.232.73.121/api`",
-    "version": "2.1.0",
-    "contact": { "name": "PizzaHap Support", "email": "support@pizzahap.com" }
+    "version": "2.0.0",
+    "description": "Location-aware pizza ordering platform. Each branch has its own menu availability. Admin can toggle products per location."
   },
-  "servers": [
-    { "url": "http://13.232.73.121/api", "description": "Production" },
-    { "url": "http://localhost:3000/api", "description": "Local Development" }
-  ],
-  "tags": [
-    { "name": "Auth" },
-    { "name": "Locations" },
-    { "name": "Menu - Categories" },
-    { "name": "Menu - Products" },
-    { "name": "Menu - Toppings & Crusts" },
-    { "name": "Orders" },
-    { "name": "Payments" },
-    { "name": "Refunds" },
-    { "name": "Coupons" },
-    { "name": "Ratings" },
-    { "name": "Notifications" },
-    { "name": "Support" },
-    { "name": "Admin - Auth" },
-    { "name": "Admin - Dashboard" },
-    { "name": "Admin - Orders" },
-    { "name": "Admin - Users" },
-    { "name": "Admin - Menu" },
-    { "name": "Admin - Coupons" },
-    { "name": "Admin - Refunds" },
-    { "name": "Admin - Support" }
-  ],
+  "servers": [{ "url": "http://13.232.73.121/api", "description": "Production" }],
   "components": {
     "securitySchemes": {
-      "BearerAuth": {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT",
-        "description": "User JWT (7-day) from /auth/login or /auth/register. Admin JWT (12-hour) from /admin/auth/login."
-      }
-    },
-    "schemas": {
-      "SuccessEnvelope": {
-        "type": "object",
-        "properties": {
-          "success": { "type": "boolean", "example": true },
-          "message": { "type": "string", "example": "Success" },
-          "data": {}
-        }
-      },
-      "ErrorEnvelope": {
-        "type": "object",
-        "properties": {
-          "success": { "type": "boolean", "example": false },
-          "message": { "type": "string" },
-          "errors": { "type": "array", "nullable": true, "items": { "type": "object", "properties": { "field": { "type": "string" }, "message": { "type": "string" } } } }
-        }
-      },
-      "Pagination": {
-        "type": "object",
-        "properties": {
-          "total": { "type": "integer" },
-          "page": { "type": "integer" },
-          "limit": { "type": "integer" },
-          "totalPages": { "type": "integer" },
-          "hasNext": { "type": "boolean" },
-          "hasPrev": { "type": "boolean" }
-        }
-      },
-      "User": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string" },
-          "email": { "type": "string", "format": "email" },
-          "mobile": { "type": "string", "nullable": true },
-          "profile_picture": { "type": "string", "nullable": true },
-          "address": { "type": "string", "nullable": true },
-          "latitude": { "type": "number", "nullable": true },
-          "longitude": { "type": "number", "nullable": true },
-          "preferred_location_id": { "type": "integer", "nullable": true },
-          "preferred_location_name": { "type": "string", "nullable": true },
-          "created_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "AuthTokenPair": {
-        "type": "object",
-        "properties": {
-          "user": { "$ref": "#/components/schemas/User" },
-          "accessToken": { "type": "string", "description": "JWT — 7 days" },
-          "refreshToken": { "type": "string", "description": "JWT — 30 days" }
-        }
-      },
-      "Location": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string" },
-          "address": { "type": "string" },
-          "latitude": { "type": "number" },
-          "longitude": { "type": "number" },
-          "phone": { "type": "string", "nullable": true },
-          "opening_time": { "type": "string", "nullable": true },
-          "closing_time": { "type": "string", "nullable": true },
-          "is_active": { "type": "boolean" },
-          "distance_km": { "type": "number", "nullable": true, "description": "Only present when lat/lng query params passed" }
-        }
-      },
-      "Category": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string" },
-          "description": { "type": "string", "nullable": true },
-          "image_url": { "type": "string", "nullable": true },
-          "sort_order": { "type": "integer" },
-          "is_active": { "type": "boolean" }
-        }
-      },
-      "ProductSize": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "product_id": { "type": "integer" },
-          "size_name": { "type": "string", "example": "Medium" },
-          "size_code": { "type": "string", "nullable": true, "example": "M" },
-          "price": { "type": "number", "example": 299.0 },
-          "is_available": { "type": "boolean" }
-        }
-      },
-      "CrustType": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string", "example": "Thin Crust" },
-          "extra_price": { "type": "number", "example": 0.0 },
-          "sort_order": { "type": "integer" },
-          "is_available": { "type": "boolean" }
-        }
-      },
-      "Topping": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string", "example": "Extra Cheese" },
-          "price": { "type": "number", "example": 49.0 },
-          "is_veg": { "type": "boolean" },
-          "sort_order": { "type": "integer" },
-          "is_available": { "type": "boolean" }
-        }
-      },
-      "ProductSummary": {
-        "description": "Returned in list and featured endpoints (no sizes/crusts/toppings/reviews)",
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string" },
-          "description": { "type": "string", "nullable": true },
-          "image_url": { "type": "string", "nullable": true },
-          "base_price": { "type": "number" },
-          "category_id": { "type": "integer" },
-          "category_name": { "type": "string" },
-          "is_veg": { "type": "boolean" },
-          "is_featured": { "type": "boolean" },
-          "is_available": { "type": "boolean" },
-          "sort_order": { "type": "integer" }
-        }
-      },
-      "Review": {
-        "type": "object",
-        "properties": {
-          "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
-          "review": { "type": "string", "nullable": true },
-          "user_name": { "type": "string" },
-          "created_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "ProductDetail": {
-        "description": "Full product from GET /menu/products/:id — includes sizes (product-specific), crusts (all global), toppings (all global), up to 5 reviews",
-        "allOf": [
-          { "$ref": "#/components/schemas/ProductSummary" },
-          {
-            "type": "object",
-            "properties": {
-              "sizes": { "type": "array", "items": { "$ref": "#/components/schemas/ProductSize" } },
-              "crusts": { "type": "array", "items": { "$ref": "#/components/schemas/CrustType" } },
-              "toppings": { "type": "array", "items": { "$ref": "#/components/schemas/Topping" } },
-              "avg_rating": { "type": "number", "nullable": true, "example": 4.3 },
-              "review_count": { "type": "integer", "example": 12 },
-              "reviews": { "type": "array", "items": { "$ref": "#/components/schemas/Review" }, "description": "Up to 5 most recent approved reviews" }
-            }
-          }
-        ]
-      },
-      "OrderItemInput": {
-        "type": "object",
-        "required": ["product_id", "size_id"],
-        "properties": {
-          "product_id": { "type": "integer" },
-          "size_id": { "type": "integer" },
-          "crust_id": { "type": "integer", "nullable": true },
-          "toppings": { "type": "array", "items": { "type": "integer" }, "description": "Array of Topping IDs", "example": [1, 3] },
-          "quantity": { "type": "integer", "minimum": 1, "default": 1 },
-          "special_instructions": { "type": "string", "nullable": true }
-        }
-      },
-      "OrderCalculation": {
-        "type": "object",
-        "properties": {
-          "subtotal": { "type": "number", "example": 598.0 },
-          "discount_amount": { "type": "number", "example": 59.8 },
-          "delivery_fee": { "type": "number", "example": 0.0, "description": "40 if subtotal < 300 AND delivery_type=delivery, else 0" },
-          "tax_amount": { "type": "number", "example": 26.91, "description": "5% of (subtotal - discount + delivery_fee)" },
-          "total_amount": { "type": "number", "example": 565.11 },
-          "coupon": { "type": "object", "nullable": true, "description": "Full coupon row if coupon_code was applied" }
-        }
-      },
-      "OrderItemToppingRow": {
-        "type": "object",
-        "properties": {
-          "topping_id": { "type": "integer" },
-          "topping_name": { "type": "string" },
-          "price": { "type": "number" }
-        }
-      },
-      "OrderItemRow": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "order_id": { "type": "integer" },
-          "product_id": { "type": "integer" },
-          "product_name": { "type": "string" },
-          "size_id": { "type": "integer" },
-          "size_name": { "type": "string" },
-          "crust_id": { "type": "integer", "nullable": true },
-          "crust_name": { "type": "string", "nullable": true },
-          "quantity": { "type": "integer" },
-          "unit_price": { "type": "number" },
-          "total_price": { "type": "number" },
-          "special_instructions": { "type": "string", "nullable": true },
-          "image_url": { "type": "string", "nullable": true, "description": "Joined from Products" },
-          "toppings": { "type": "array", "items": { "$ref": "#/components/schemas/OrderItemToppingRow" } }
-        }
-      },
-      "OrderStatusHistoryRow": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "order_id": { "type": "integer" },
-          "status": { "type": "string" },
-          "note": { "type": "string", "nullable": true },
-          "changed_by": { "type": "integer", "nullable": true },
-          "changed_by_role": { "type": "string", "example": "user" },
-          "created_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "PaymentRow": {
-        "type": "object",
-        "properties": {
-          "payment_method": { "type": "string" },
-          "status": { "type": "string" },
-          "amount": { "type": "number" }
-        }
-      },
-      "OrderSummary": {
-        "description": "Returned in the list endpoint — no items/history/payment sub-objects",
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "order_number": { "type": "string", "example": "GOBT-7891234" },
-          "user_id": { "type": "integer" },
-          "location_id": { "type": "integer" },
-          "location_name": { "type": "string" },
-          "delivery_type": { "type": "string", "enum": ["delivery", "pickup"] },
-          "delivery_address": { "type": "string", "nullable": true },
-          "status": { "type": "string", "enum": ["pending","confirmed","preparing","out_for_delivery","delivered","cancelled"] },
-          "payment_status": { "type": "string", "enum": ["pending","paid","failed","refunded"] },
-          "subtotal": { "type": "number" },
-          "discount_amount": { "type": "number" },
-          "delivery_fee": { "type": "number" },
-          "tax_amount": { "type": "number" },
-          "total_amount": { "type": "number" },
-          "coupon_id": { "type": "integer", "nullable": true },
-          "special_instructions": { "type": "string", "nullable": true },
-          "cancellation_reason": { "type": "string", "nullable": true },
-          "cancelled_by": { "type": "string", "nullable": true },
-          "cancellation_time": { "type": "string", "format": "date-time", "nullable": true },
-          "created_at": { "type": "string", "format": "date-time" },
-          "updated_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "OrderDetail": {
-        "description": "Full order from GET /orders/:id",
-        "allOf": [
-          { "$ref": "#/components/schemas/OrderSummary" },
-          {
-            "type": "object",
-            "properties": {
-              "location_address": { "type": "string", "nullable": true },
-              "items": { "type": "array", "items": { "$ref": "#/components/schemas/OrderItemRow" } },
-              "status_history": { "type": "array", "items": { "$ref": "#/components/schemas/OrderStatusHistoryRow" }, "description": "Ordered ASC by created_at" },
-              "payment": { "nullable": true, "allOf": [{ "$ref": "#/components/schemas/PaymentRow" }], "description": "null if no payment record yet" }
-            }
-          }
-        ]
-      },
-      "Coupon": {
-        "type": "object",
-        "description": "Shape returned by GET /coupons — public fields only",
-        "properties": {
-          "code": { "type": "string", "example": "PIZZA20" },
-          "description": { "type": "string", "nullable": true },
-          "discount_type": { "type": "string", "enum": ["percentage","flat"] },
-          "discount_value": { "type": "number", "example": 20 },
-          "min_order_value": { "type": "number", "example": 300 },
-          "valid_until": { "type": "string", "format": "date-time" }
-        }
-      },
-      "CouponValidateResponse": {
-        "type": "object",
-        "properties": {
-          "coupon_id": { "type": "integer" },
-          "code": { "type": "string" },
-          "discount_type": { "type": "string", "enum": ["percentage","flat"] },
-          "discount_value": { "type": "number" },
-          "calculated_discount": { "type": "number", "description": "Actual rupee discount for the given order_value" },
-          "description": { "type": "string", "nullable": true }
-        }
-      },
-      "Notification": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "user_id": { "type": "integer" },
-          "title": { "type": "string" },
-          "message": { "type": "string" },
-          "type": { "type": "string", "nullable": true },
-          "is_read": { "type": "boolean" },
-          "created_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "SupportTicketSummary": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "ticket_number": { "type": "string", "example": "TKT-12345678" },
-          "user_id": { "type": "integer" },
-          "order_id": { "type": "integer", "nullable": true },
-          "order_number": { "type": "string", "nullable": true },
-          "subject": { "type": "string" },
-          "category": { "type": "string", "enum": ["order_issue","payment","refund","delivery","other"] },
-          "status": { "type": "string", "enum": ["open","in_progress","resolved","closed"] },
-          "priority": { "type": "string", "nullable": true },
-          "created_at": { "type": "string", "format": "date-time" },
-          "updated_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "SupportMessage": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "ticket_id": { "type": "integer" },
-          "sender_id": { "type": "integer" },
-          "sender_role": { "type": "string", "enum": ["user","admin"] },
-          "sender_name": { "type": "string", "nullable": true, "description": "Resolved from Users or Admins table via CASE JOIN" },
-          "message": { "type": "string" },
-          "created_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "SupportTicketDetail": {
-        "allOf": [
-          { "$ref": "#/components/schemas/SupportTicketSummary" },
-          { "type": "object", "properties": { "messages": { "type": "array", "items": { "$ref": "#/components/schemas/SupportMessage" }, "description": "Ordered ASC by created_at" } } }
-        ]
-      },
-      "Refund": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "order_id": { "type": "integer" },
-          "order_number": { "type": "string" },
-          "payment_id": { "type": "integer" },
-          "amount": { "type": "number" },
-          "reason": { "type": "string" },
-          "status": { "type": "string", "enum": ["pending","processing","completed","failed"] },
-          "requested_by": { "type": "integer" },
-          "processed_by": { "type": "integer", "nullable": true },
-          "processed_at": { "type": "string", "format": "date-time", "nullable": true },
-          "notes": { "type": "string", "nullable": true },
-          "requested_at": { "type": "string", "format": "date-time" }
-        }
-      },
-      "PayUParams": {
-        "type": "object",
-        "description": "Pass these fields directly to PayU Flutter/JS SDK",
-        "properties": {
-          "key": { "type": "string", "description": "PAYU_MERCHANT_KEY" },
-          "txnid": { "type": "string" },
-          "amount": { "type": "string", "example": "565.11" },
-          "productinfo": { "type": "string", "example": "Pizza Order GOBT-7891234" },
-          "firstname": { "type": "string" },
-          "email": { "type": "string" },
-          "phone": { "type": "string", "nullable": true },
-          "surl": { "type": "string", "description": "http://13.232.73.121/api/payments/payu-webhook" },
-          "furl": { "type": "string", "description": "http://13.232.73.121/api/payments/payu-webhook" },
-          "hash": { "type": "string", "description": "SHA-512 of key|txnid|amount|productinfo|firstname|email|udf1|||||||||||SALT" },
-          "udf1": { "type": "string", "description": "order_id as string" },
-          "environment": { "type": "integer", "enum": [0,1], "description": "0 = production, 1 = test" }
-        }
-      },
-      "DashboardStats": {
-        "type": "object",
-        "properties": {
-          "today": { "type": "object", "properties": { "orders": { "type": "integer" }, "revenue": { "type": "number" } } },
-          "total_revenue": { "type": "number" },
-          "new_users_today": { "type": "integer" },
-          "pending_orders": { "type": "integer", "description": "Count of orders in pending | confirmed | preparing" },
-          "popular_products": {
-            "type": "array",
-            "items": { "type": "object", "properties": { "name": { "type": "string" }, "image_url": { "type": "string", "nullable": true }, "order_count": { "type": "integer" }, "revenue": { "type": "number" } } },
-            "description": "Top 5 by order_count (paid orders only)"
-          }
-        }
-      },
-      "ReportRow": {
-        "type": "object",
-        "properties": {
-          "period": { "type": "string", "example": "2024-03-14", "description": "DATE | WEEK number | YYYY-MM depending on period param" },
-          "total_orders": { "type": "integer" },
-          "revenue": { "type": "number" },
-          "delivered": { "type": "integer" },
-          "cancelled": { "type": "integer" }
-        }
-      },
-      "AdminOrderRow": {
-        "allOf": [
-          { "$ref": "#/components/schemas/OrderSummary" },
-          { "type": "object", "properties": { "user_name": { "type": "string" }, "user_mobile": { "type": "string", "nullable": true }, "location_name": { "type": "string" } } }
-        ]
-      },
-      "AdminUserRow": {
-        "type": "object",
-        "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string" },
-          "email": { "type": "string" },
-          "mobile": { "type": "string", "nullable": true },
-          "is_verified": { "type": "boolean" },
-          "is_active": { "type": "boolean" },
-          "is_blocked": { "type": "boolean" },
-          "created_at": { "type": "string", "format": "date-time" },
-          "last_login": { "type": "string", "format": "date-time", "nullable": true }
-        }
-      },
-      "InvoiceResponse": {
-        "type": "object",
-        "properties": {
-          "invoice_number": { "type": "string", "example": "INV-GOBT-7891234" },
-          "order_number": { "type": "string" },
-          "customer": { "type": "object", "properties": { "name": { "type": "string" }, "email": { "type": "string" }, "mobile": { "type": "string", "nullable": true } } },
-          "branch": { "type": "string" },
-          "items": {
-            "type": "array",
-            "items": { "type": "object", "properties": {
-              "product_name": { "type": "string" }, "size_name": { "type": "string" }, "crust_name": { "type": "string", "nullable": true },
-              "toppings_list": { "type": "string", "nullable": true, "description": "Comma-separated topping names via GROUP_CONCAT" },
-              "quantity": { "type": "integer" }, "unit_price": { "type": "number" }, "total_price": { "type": "number" }
-            }}
-          },
-          "subtotal": { "type": "number" },
-          "discount": { "type": "number" },
-          "delivery_fee": { "type": "number" },
-          "cgst": { "type": "number", "description": "tax_amount / 2" },
-          "sgst": { "type": "number", "description": "tax_amount / 2" },
-          "total": { "type": "number" },
-          "date": { "type": "string", "format": "date-time" }
-        }
-      }
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
     }
   },
+  "security": [{ "bearerAuth": [] }],
   "paths": {
-    "/auth/send-otp": {
-      "post": {
-        "tags": ["Auth"],
-        "summary": "Send OTP to email",
-        "description": "Generates 6-digit OTP, invalidates any prior unused OTP for same email+type, stores in OtpTokens, emails via Gmail. Response masks email (e.g. jo****@gmail.com).",
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["email"], "properties": { "email": { "type": "string", "format": "email", "example": "john@example.com" } } } } }
-        },
-        "responses": {
-          "200": { "description": "OTP sent — message includes masked email", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SuccessEnvelope" }, "example": { "success": true, "message": "OTP sent to jo****@gmail.com", "data": {} } } } },
-          "400": { "description": "Validation error or send failure", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } } }
-        }
-      }
-    },
-    "/auth/resend-otp": {
-      "post": {
-        "tags": ["Auth"],
-        "summary": "Resend OTP (generates a fresh OTP, invalidates previous)",
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["email"], "properties": { "email": { "type": "string", "format": "email" } } } } }
-        },
-        "responses": {
-          "200": { "description": "OTP resent successfully" },
-          "400": { "description": "Validation error or send failure" }
-        }
-      }
-    },
-    "/auth/register": {
-      "post": {
-        "tags": ["Auth"],
-        "summary": "Register a new user",
-        "description": "Verifies OTP (DB-based, with attempt limit and expiry), checks email uniqueness, inserts User with is_verified=1, issues accessToken + refreshToken (stored in RefreshTokens table).",
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": {
-            "type": "object", "required": ["name","email","otp"],
-            "properties": {
-              "name": { "type": "string", "example": "John Doe" },
-              "email": { "type": "string", "format": "email", "example": "john@example.com" },
-              "otp": { "type": "string", "minLength": 6, "maxLength": 6, "example": "482931" },
-              "mobile": { "type": "string", "pattern": "^[6-9]\\d{9}$", "nullable": true, "example": "9876543210", "description": "Optional — 10-digit Indian mobile" }
-            }
-          }}}
-        },
-        "responses": {
-          "201": { "description": "Registered — tokens issued", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AuthTokenPair" } } }] } } } },
-          "400": { "description": "Invalid/expired OTP (includes reason: 'Too many attempts' if ≥5 wrong tries)" },
-          "409": { "description": "Email already registered" }
-        }
-      }
-    },
-    "/auth/login": {
-      "post": {
-        "tags": ["Auth"],
-        "summary": "Login with email + OTP",
-        "description": "Verifies OTP, checks user exists and is not blocked/deactivated, updates last_login, issues token pair (new refresh token stored in RefreshTokens).",
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["email","otp"], "properties": { "email": { "type": "string", "format": "email" }, "otp": { "type": "string", "minLength": 6, "maxLength": 6 } } } } }
-        },
-        "responses": {
-          "200": { "description": "Login successful", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AuthTokenPair" } } }] } } } },
-          "400": { "description": "Invalid/expired OTP" },
-          "401": { "description": "Account blocked or deactivated" },
-          "404": { "description": "Email not registered — must register first" }
-        }
-      }
-    },
-    "/auth/refresh-token": {
-      "post": {
-        "tags": ["Auth"],
-        "summary": "Rotate token pair",
-        "description": "Verifies refreshToken JWT signature and checks it exists in RefreshTokens with expires_at > NOW(). Deletes old token, inserts new pair. Both tokens are rotated.",
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["refreshToken"], "properties": { "refreshToken": { "type": "string" } } } } }
-        },
-        "responses": {
-          "200": { "description": "New token pair", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "accessToken": { "type": "string" }, "refreshToken": { "type": "string" } } } } }] } } } },
-          "400": { "description": "refreshToken missing in body" },
-          "401": { "description": "Invalid JWT or token not found/expired in DB — user must re-login" }
-        }
-      }
-    },
-    "/auth/logout": {
-      "post": {
-        "tags": ["Auth"],
-        "summary": "Logout — delete refresh token from DB",
-        "description": "If refreshToken is provided, deletes it from RefreshTokens. Always returns 200 (best-effort).",
-        "requestBody": {
-          "content": { "application/json": { "schema": { "type": "object", "properties": { "refreshToken": { "type": "string" } } } } }
-        },
-        "responses": {
-          "200": { "description": "Logged out successfully" }
-        }
-      }
-    },
-    "/auth/me": {
-      "get": {
-        "tags": ["Auth"],
-        "summary": "Get current user (with preferred_location_name)",
-        "description": "Returns full user row LEFT JOINed with Locations to get preferred_location_name.",
-        "security": [{ "BearerAuth": [] }],
-        "responses": {
-          "200": { "description": "User profile", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/User" } } }] } } } },
-          "401": { "description": "Missing/invalid/expired token" },
-          "403": { "description": "Account blocked or deactivated" }
-        }
-      }
-    },
-    "/auth/profile": {
-      "put": {
-        "tags": ["Auth"],
-        "summary": "Update profile fields",
-        "description": "All fields optional. Uses IFNULL(?, col) so only provided non-null fields are changed. email cannot be changed (it is the login identifier).",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "content": { "application/json": { "schema": { "type": "object", "properties": {
-            "name": { "type": "string" },
-            "mobile": { "type": "string", "pattern": "^[6-9]\\d{9}$" },
-            "address": { "type": "string" },
-            "latitude": { "type": "number" },
-            "longitude": { "type": "number" },
-            "preferred_location_id": { "type": "integer" }
-          }}}}
-        },
-        "responses": {
-          "200": { "description": "Profile updated" },
-          "400": { "description": "Validation error" },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
     "/locations": {
       "get": {
         "tags": ["Locations"],
-        "summary": "Get all active locations",
-        "description": "Returns all with is_active=1 ordered by name. If latitude+longitude provided, adds distance_km (Haversine) and sorts nearest-first.",
+        "summary": "Get all active locations, sorted by distance if lat/lng provided",
+        "security": [],
         "parameters": [
-          { "in": "query", "name": "latitude", "schema": { "type": "number" } },
+          { "in": "query", "name": "latitude",  "schema": { "type": "number" } },
           { "in": "query", "name": "longitude", "schema": { "type": "number" } }
         ],
-        "responses": {
-          "200": { "description": "Location list", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Location" } } } }] } } } }
-        }
+        "responses": { "200": { "description": "List of locations" } }
       }
     },
     "/locations/nearest": {
       "get": {
         "tags": ["Locations"],
-        "summary": "Get nearest active branch",
-        "description": "Without coordinates returns first active location. With lat/lng returns single nearest location + distance_km.",
+        "summary": "Get nearest location to given coordinates",
+        "security": [],
         "parameters": [
-          { "in": "query", "name": "latitude", "schema": { "type": "number" } },
+          { "in": "query", "name": "latitude",  "schema": { "type": "number" } },
           { "in": "query", "name": "longitude", "schema": { "type": "number" } }
         ],
-        "responses": {
-          "200": { "description": "Nearest location", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/Location" } } }] } } } }
-        }
+        "responses": { "200": { "description": "Nearest location object" } }
       }
     },
-    "/locations/{id}": {
-      "get": {
-        "tags": ["Locations"],
-        "summary": "Get location by ID",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": {
-          "200": { "description": "Location detail" },
-          "404": { "description": "Location not found or inactive" }
-        }
+    "/auth/send-otp": {
+      "post": { "tags": ["Auth"], "summary": "Send OTP to email", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "email": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "OTP sent" } }
       }
+    },
+    "/auth/resend-otp": {
+      "post": { "tags": ["Auth"], "summary": "Resend OTP", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "email": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "OTP resent" } }
+      }
+    },
+    "/auth/register": {
+      "post": { "tags": ["Auth"], "summary": "Register new user", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "email": { "type": "string" }, "otp": { "type": "string" }, "mobile": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "User registered, tokens returned" } }
+      }
+    },
+    "/auth/login": {
+      "post": { "tags": ["Auth"], "summary": "Login with OTP", "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "email": { "type": "string" }, "otp": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Tokens returned" } }
+      }
+    },
+    "/auth/me": {
+      "get": { "tags": ["Auth"], "summary": "Get current user profile", "responses": { "200": { "description": "User object" } } }
+    },
+    "/auth/logout": {
+      "post": { "tags": ["Auth"], "summary": "Logout", "responses": { "200": { "description": "Logged out" } } }
     },
     "/menu/categories": {
-      "get": {
-        "tags": ["Menu - Categories"],
-        "summary": "Get all active categories",
-        "description": "WHERE is_active=1, ordered by sort_order. No auth required.",
-        "responses": {
-          "200": { "description": "Category list", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Category" } } } }] } } } }
-        }
-      }
+      "get": { "tags": ["Menu"], "summary": "List all active categories", "security": [], "responses": { "200": { "description": "Category list" } } }
     },
     "/menu/products": {
       "get": {
-        "tags": ["Menu - Products"],
-        "summary": "Get paginated products",
-        "description": "WHERE is_available=1, with optional filters. Ordered by sort_order then name. No auth required.",
+        "tags": ["Menu"],
+        "summary": "List products, filtered by location if location_id provided",
+        "security": [],
         "parameters": [
+          { "in": "query", "name": "location_id", "schema": { "type": "integer" }, "description": "Filter out products unavailable at this location" },
           { "in": "query", "name": "category_id", "schema": { "type": "integer" } },
-          { "in": "query", "name": "is_veg", "schema": { "type": "boolean" }, "description": "true=veg only, false=non-veg only" },
-          { "in": "query", "name": "search", "schema": { "type": "string" }, "description": "LIKE match on name OR description" },
-          { "in": "query", "name": "page", "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit", "schema": { "type": "integer", "default": 20 } }
+          { "in": "query", "name": "is_veg",      "schema": { "type": "boolean" } },
+          { "in": "query", "name": "search",      "schema": { "type": "string"  } },
+          { "in": "query", "name": "page",        "schema": { "type": "integer" } },
+          { "in": "query", "name": "limit",       "schema": { "type": "integer" } }
         ],
-        "responses": {
-          "200": { "description": "Paginated product list", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/ProductSummary" } }, "pagination": { "$ref": "#/components/schemas/Pagination" } } } } } }
-        }
+        "responses": { "200": { "description": "Paginated product list" } }
       }
     },
     "/menu/products/featured": {
       "get": {
-        "tags": ["Menu - Products"],
-        "summary": "Get featured products (max 10)",
-        "description": "WHERE is_featured=1 AND is_available=1, ordered by sort_order, LIMIT 10. No auth required.",
-        "responses": {
-          "200": { "description": "Featured products", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/ProductSummary" } } } }] } } } }
-        }
+        "tags": ["Menu"], "summary": "Featured products", "security": [],
+        "parameters": [{ "in": "query", "name": "location_id", "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "Featured product list" } }
       }
     },
     "/menu/products/{id}": {
       "get": {
-        "tags": ["Menu - Products"],
-        "summary": "Get full product detail",
-        "description": "Returns product + sizes (product-specific, available only) + ALL globally available crusts + ALL globally available toppings + up to 5 most recent approved reviews + avg_rating + review_count. No auth required.",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": {
-          "200": { "description": "Full product detail", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/ProductDetail" } } }] } } } },
-          "404": { "description": "Product not found or not available" }
-        }
-      }
-    },
-    "/menu/toppings": {
-      "get": {
-        "tags": ["Menu - Toppings & Crusts"],
-        "summary": "Get available toppings",
-        "description": "WHERE is_available=1, optional is_veg filter, ordered by sort_order. No auth required.",
+        "tags": ["Menu"], "summary": "Get single product with sizes, crusts, toppings", "security": [],
         "parameters": [
-          { "in": "query", "name": "is_veg", "schema": { "type": "boolean" } }
+          { "in": "path",  "name": "id",          "required": true, "schema": { "type": "integer" } },
+          { "in": "query", "name": "location_id", "schema": { "type": "integer" } }
         ],
-        "responses": {
-          "200": { "description": "Toppings list", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Topping" } } } }] } } } }
-        }
+        "responses": { "200": { "description": "Product detail" }, "404": { "description": "Not found or unavailable at location" } }
       }
     },
-    "/menu/crusts": {
-      "get": {
-        "tags": ["Menu - Toppings & Crusts"],
-        "summary": "Get available crust types",
-        "description": "WHERE is_available=1, ordered by sort_order. No auth required.",
-        "responses": {
-          "200": { "description": "Crust types list", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/CrustType" } } } }] } } } }
-        }
+    "/menu/toppings": { "get": { "tags": ["Menu"], "summary": "List toppings", "security": [], "responses": { "200": { "description": "Toppings" } } } },
+    "/menu/crusts":   { "get": { "tags": ["Menu"], "summary": "List crusts",   "security": [], "responses": { "200": { "description": "Crusts" } } } },
+    "/orders": {
+      "post": { "tags": ["Orders"], "summary": "Place order",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Order placed" } }
+      },
+      "get": { "tags": ["Orders"], "summary": "Get my orders",
+        "parameters": [{ "in": "query", "name": "status", "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Orders list" } }
       }
     },
     "/orders/calculate": {
-      "post": {
-        "tags": ["Orders"],
-        "summary": "Calculate order total (preview — no records created)",
-        "description": "Looks up size prices, crust extra_price, topping prices. Applies coupon discount. delivery_fee = 40 if subtotal < 300 AND delivery_type=delivery, else 0. tax = 5% of (subtotal - discount + delivery_fee). Auth required.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["items"], "properties": {
-            "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/OrderItemInput" } },
-            "coupon_code": { "type": "string", "nullable": true },
-            "delivery_type": { "type": "string", "enum": ["delivery","pickup"], "default": "delivery" }
-          }}}}
-        },
-        "responses": {
-          "200": { "description": "Price breakdown", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/OrderCalculation" } } }] } } } },
-          "400": { "description": "Invalid size/crust/topping ID, or coupon invalid/expired/min order not met" },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
-    "/orders": {
-      "post": {
-        "tags": ["Orders"],
-        "summary": "Place a new order",
-        "description": "Full DB transaction: validates items, calculates totals, inserts Orders + OrderItems + OrderItemToppings + OrderStatusHistory (status=pending). If coupon used: increments used_count, inserts UserCouponUsage. Returns order_id, order_number, total_amount. Call POST /payments/create-order next to process payment.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["items","location_id"], "properties": {
-            "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/OrderItemInput" } },
-            "location_id": { "type": "integer" },
-            "delivery_type": { "type": "string", "enum": ["delivery","pickup"], "default": "delivery" },
-            "delivery_address": { "type": "string", "nullable": true },
-            "delivery_latitude": { "type": "number", "nullable": true },
-            "delivery_longitude": { "type": "number", "nullable": true },
-            "coupon_code": { "type": "string", "nullable": true },
-            "special_instructions": { "type": "string", "nullable": true },
-            "payment_method": { "type": "string", "enum": ["cash_on_delivery","payu"] }
-          }}}}
-        },
-        "responses": {
-          "201": { "description": "Order placed — call /payments/create-order to proceed", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "order_id": { "type": "integer" }, "order_number": { "type": "string", "example": "GOBT-7891234" }, "total_amount": { "type": "number" } } } } }] } } } },
-          "400": { "description": "Product unavailable, invalid size, coupon issues, min order not met" },
-          "401": { "description": "Unauthorized" }
-        }
-      },
-      "get": {
-        "tags": ["Orders"],
-        "summary": "Get my orders (paginated)",
-        "description": "Scoped to req.user.id. Optional status filter. Newest first. Joined with location_name.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [
-          { "in": "query", "name": "status", "schema": { "type": "string", "enum": ["pending","confirmed","preparing","out_for_delivery","delivered","cancelled"] } },
-          { "in": "query", "name": "page", "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit", "schema": { "type": "integer", "default": 10 } }
-        ],
-        "responses": {
-          "200": { "description": "Paginated order list", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/OrderSummary" } }, "pagination": { "$ref": "#/components/schemas/Pagination" } } } } } },
-          "401": { "description": "Unauthorized" }
-        }
+      "post": { "tags": ["Orders"], "summary": "Calculate order totals",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "200": { "description": "Calculated totals" } }
       }
     },
     "/orders/{id}": {
-      "get": {
-        "tags": ["Orders"],
-        "summary": "Get full order detail",
-        "description": "Returns order + items (each item has toppings array) + status_history (ASC) + payment (nullable). Scoped to req.user.id.",
-        "security": [{ "BearerAuth": [] }],
+      "get": { "tags": ["Orders"], "summary": "Get order detail",
         "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": {
-          "200": { "description": "Full order detail", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/OrderDetail" } } }] } } } },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Order not found or belongs to another user" }
-        }
+        "responses": { "200": { "description": "Order detail" } }
       }
     },
     "/orders/{id}/cancel": {
-      "post": {
-        "tags": ["Orders"],
-        "summary": "Cancel an order",
-        "description": "Allowed only when status IN ('pending','confirmed'). Sets status=cancelled, writes cancellation_reason, cancellation_time, cancelled_by='user'. Inserts OrderStatusHistory row.",
-        "security": [{ "BearerAuth": [] }],
+      "post": { "tags": ["Orders"], "summary": "Cancel order",
         "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": {
-          "content": { "application/json": { "schema": { "type": "object", "properties": { "reason": { "type": "string", "nullable": true } } } } }
-        },
-        "responses": {
-          "200": { "description": "Order cancelled" },
-          "400": { "description": "Cannot cancel at this stage (not pending/confirmed)" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Order not found" }
-        }
+        "responses": { "200": { "description": "Cancelled" } }
       }
     },
-    "/orders/{id}/reorder": {
-      "post": {
-        "tags": ["Orders"],
-        "summary": "Get cart items from a previous order",
-        "description": "Returns items array with product_id, size_id, crust_id, quantity, special_instructions, and toppings (array of IDs). Ready to pass directly to POST /orders. Does NOT create any new order.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": {
-          "200": { "description": "Items ready to reorder", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/OrderItemInput" } } } } } }] } } } },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Order not found or no items" }
-        }
-      }
-    },
-    "/payments/create-order": {
-      "post": {
-        "tags": ["Payments"],
-        "summary": "Initiate payment for a placed order",
-        "description": "COD: inserts Payments(status=pending), updates Orders.status=confirmed, inserts OrderStatusHistory. Returns HTTP 200.\n\nPayU: generates txnid + SHA-512 hash, inserts Payments(status=pending), returns HTTP 201 with full payu_params. Pass payu_params to PayU Flutter SDK. Fields razorpay_order_id (=txnid) and key_id (=PAYU_MERCHANT_KEY) are legacy aliases.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["order_id","payment_method"], "properties": {
-            "order_id": { "type": "integer" },
-            "payment_method": { "type": "string", "enum": ["cash_on_delivery","payu"] }
-          }}}}
-        },
-        "responses": {
-          "200": { "description": "COD confirmed", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "payment_method": { "type": "string", "example": "cash_on_delivery" }, "order_id": { "type": "integer" } } } } }] } } } },
-          "201": { "description": "PayU params — pass to SDK", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": {
-            "razorpay_order_id": { "type": "string", "description": "Alias for txnid" },
-            "amount": { "type": "integer", "description": "Paise (rupees × 100)" },
-            "currency": { "type": "string", "example": "INR" },
-            "key_id": { "type": "string", "description": "PAYU_MERCHANT_KEY" },
-            "order_number": { "type": "string" },
-            "payu_params": { "$ref": "#/components/schemas/PayUParams" }
-          }}}}]}}}},
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Order not found or already paid (payment_status != pending)" }
-        }
-      }
-    },
-    "/payments/verify": {
-      "post": {
-        "tags": ["Payments"],
-        "summary": "Verify PayU payment after SDK callback",
-        "description": "Verifies reverse SHA-512 hash (SALT|status|...|key). On success: updates Payments(status=captured), Orders(payment_status=paid, status=confirmed), inserts OrderStatusHistory.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["razorpay_order_id","razorpay_payment_id","razorpay_signature","order_id"], "properties": {
-            "razorpay_order_id": { "type": "string", "description": "txnid from PayU SDK callback" },
-            "razorpay_payment_id": { "type": "string", "description": "mihpayid from PayU SDK callback" },
-            "razorpay_signature": { "type": "string", "description": "hash from PayU SDK callback" },
-            "order_id": { "type": "integer" }
-          }}}}
-        },
-        "responses": {
-          "200": { "description": "Payment verified — order confirmed", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "payment_id": { "type": "string" } } } } }] } } } },
-          "400": { "description": "Hash mismatch — sets Payments.status=failed" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Payment record not found for given txnid" }
-        }
-      }
-    },
-    "/payments/payu-webhook": {
-      "post": {
-        "tags": ["Payments"],
-        "summary": "PayU server-to-server webhook (surl + furl)",
-        "description": "Configure as both surl and furl in PayU dashboard. Receives application/x-www-form-urlencoded. Verifies hash. status=success → Payments(captured) + Orders(confirmed). status=failure|failed → Payments(failed). Also aliased at /payments/razorpay-webhook.",
-        "requestBody": {
-          "required": true,
-          "content": { "application/x-www-form-urlencoded": { "schema": { "type": "object", "properties": {
-            "status": { "type": "string", "example": "success" },
-            "txnid": { "type": "string" },
-            "amount": { "type": "string" },
-            "productinfo": { "type": "string" },
-            "firstname": { "type": "string" },
-            "email": { "type": "string" },
-            "udf1": { "type": "string", "description": "order_id" },
-            "mihpayid": { "type": "string" },
-            "hash": { "type": "string" }
-          }}}}
-        },
-        "responses": {
-          "200": { "description": "OK" },
-          "400": { "description": "Invalid hash" },
-          "500": { "description": "Processing error" }
-        }
-      }
-    },
-    "/payments/razorpay-webhook": {
-      "post": {
-        "tags": ["Payments"],
-        "summary": "Legacy alias for /payments/payu-webhook",
-        "requestBody": { "content": { "application/x-www-form-urlencoded": { "schema": { "type": "object" } } } },
-        "responses": { "200": { "description": "OK" }, "400": { "description": "Invalid hash" } }
-      }
-    },
-    "/refunds/request": {
-      "post": {
-        "tags": ["Refunds"],
-        "summary": "Request a refund",
-        "description": "Eligible if order.status IN ('cancelled','delivered') AND payment_status='paid'. Must have gateway_payment_id (no COD refunds via API — handled manually). Only one non-failed refund allowed per order.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["order_id","reason"], "properties": {
-            "order_id": { "type": "integer" },
-            "reason": { "type": "string", "example": "Items were missing" }
-          }}}}
-        },
-        "responses": {
-          "201": { "description": "Refund request submitted", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "refund_id": { "type": "integer" } } } } }] } } } },
-          "400": { "description": "Not eligible, already requested, or COD order" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Order not found" }
-        }
-      }
-    },
-    "/refunds/my-refunds": {
-      "get": {
-        "tags": ["Refunds"],
-        "summary": "Get my refund requests",
-        "description": "Joins Orders for order_number. Ordered by requested_at DESC.",
-        "security": [{ "BearerAuth": [] }],
-        "responses": {
-          "200": { "description": "Refund list", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Refund" } } } }] } } } },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
-    "/coupons": {
-      "get": {
-        "tags": ["Coupons"],
-        "summary": "Get all currently active coupons",
-        "description": "WHERE is_active=1 AND within valid_from..valid_until AND (usage_limit IS NULL OR used_count < usage_limit). Returns code, description, discount_type, discount_value, min_order_value, valid_until.",
-        "security": [{ "BearerAuth": [] }],
-        "responses": {
-          "200": { "description": "Active coupons", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/Coupon" } } } }] } } } },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
+    "/coupons": { "get": { "tags": ["Coupons"], "summary": "List active coupons", "responses": { "200": { "description": "Coupons" } } } },
     "/coupons/validate": {
-      "post": {
-        "tags": ["Coupons"],
-        "summary": "Validate a coupon + get calculated discount",
-        "description": "Checks: active, validity window, global usage limit, per-user usage (UserCouponUsage table). Returns calculated_discount = rupee discount for the given order_value.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["code","order_value"], "properties": {
-            "code": { "type": "string", "example": "PIZZA20" },
-            "order_value": { "type": "number", "example": 598.0 }
-          }}}}
-        },
-        "responses": {
-          "200": { "description": "Coupon valid", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/CouponValidateResponse" } } }] } } } },
-          "400": { "description": "Invalid/expired, min order not met, or per-user limit exceeded" },
-          "401": { "description": "Unauthorized" }
-        }
+      "post": { "tags": ["Coupons"], "summary": "Validate coupon code",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "code": { "type": "string" }, "order_value": { "type": "number" } } } } } },
+        "responses": { "200": { "description": "Coupon details with calculated discount" } }
       }
     },
-    "/ratings": {
-      "post": {
-        "tags": ["Ratings"],
-        "summary": "Submit a product rating",
-        "description": "Only for delivered orders belonging to the user. Prevents duplicate (order_id + user_id + product_id) via conflict check.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["order_id","product_id","rating"], "properties": {
-            "order_id": { "type": "integer" },
-            "product_id": { "type": "integer" },
-            "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
-            "review": { "type": "string", "nullable": true }
-          }}}}
-        },
-        "responses": {
-          "201": { "description": "Rating submitted" },
-          "400": { "description": "Order not delivered or not owned by user" },
-          "401": { "description": "Unauthorized" },
-          "409": { "description": "Already rated this product for this order" }
-        }
-      }
-    },
-    "/ratings/product/{id}": {
-      "get": {
-        "tags": ["Ratings"],
-        "summary": "Get product ratings + average",
-        "description": "WHERE is_approved=1 for the product, ordered newest first. Computes avg_rating. No auth required.",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" }, "description": "Product ID" }],
-        "responses": {
-          "200": { "description": "Ratings", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "avg_rating": { "type": "number", "nullable": true }, "reviews": { "type": "array", "items": { "$ref": "#/components/schemas/Review" } } } } } }] } } } }
-        }
-      }
-    },
-    "/notifications": {
-      "get": {
-        "tags": ["Notifications"],
-        "summary": "Get my notifications (last 50)",
-        "description": "WHERE user_id=req.user.id, ordered newest first, LIMIT 50. Returns notifications array + unread_count.",
-        "security": [{ "BearerAuth": [] }],
-        "responses": {
-          "200": { "description": "Notifications + unread count", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "notifications": { "type": "array", "items": { "$ref": "#/components/schemas/Notification" } }, "unread_count": { "type": "integer" } } } } }] } } } },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
-    "/notifications/read-all": {
-      "put": {
-        "tags": ["Notifications"],
-        "summary": "Mark all as read",
-        "description": "UPDATE Notifications SET is_read=1 WHERE user_id=? AND is_read=0",
-        "security": [{ "BearerAuth": [] }],
-        "responses": {
-          "200": { "description": "All marked read" },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
-    "/notifications/{id}/read": {
-      "put": {
-        "tags": ["Notifications"],
-        "summary": "Mark single notification as read",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": {
-          "200": { "description": "Marked read" },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
+    "/notifications": { "get": { "tags": ["Notifications"], "summary": "Get my notifications", "responses": { "200": { "description": "Notifications" } } } },
+    "/notifications/read-all": { "put": { "tags": ["Notifications"], "summary": "Mark all read", "responses": { "200": { "description": "Marked" } } } },
     "/support/tickets": {
-      "post": {
-        "tags": ["Support"],
-        "summary": "Create a support ticket",
-        "description": "Inserts SupportTickets row (ticket_number = TKT-{8-digit timestamp suffix}) + opening SupportMessages row with sender_role='user'.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["subject","category","message"], "properties": {
-            "order_id": { "type": "integer", "nullable": true },
-            "subject": { "type": "string" },
-            "category": { "type": "string", "enum": ["order_issue","payment","refund","delivery","other"] },
-            "message": { "type": "string" }
-          }}}}
-        },
-        "responses": {
-          "201": { "description": "Ticket created", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "ticket_id": { "type": "integer" }, "ticket_number": { "type": "string", "example": "TKT-12345678" } } } } }] } } } },
-          "400": { "description": "Validation error" },
-          "401": { "description": "Unauthorized" }
-        }
-      },
-      "get": {
-        "tags": ["Support"],
-        "summary": "Get my tickets (paginated)",
-        "description": "Scoped to req.user.id. Joins Orders for order_number. Optional status filter. Newest first.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [
-          { "in": "query", "name": "status", "schema": { "type": "string", "enum": ["open","in_progress","resolved","closed"] } },
-          { "in": "query", "name": "page", "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit", "schema": { "type": "integer", "default": 10 } }
-        ],
-        "responses": {
-          "200": { "description": "Paginated ticket list", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/SupportTicketSummary" } }, "pagination": { "$ref": "#/components/schemas/Pagination" } } } } } },
-          "401": { "description": "Unauthorized" }
-        }
-      }
+      "get":  { "tags": ["Support"], "summary": "My tickets", "responses": { "200": { "description": "Tickets" } } },
+      "post": { "tags": ["Support"], "summary": "Create ticket", "responses": { "201": { "description": "Created" } } }
     },
-    "/support/tickets/{id}": {
-      "get": {
-        "tags": ["Support"],
-        "summary": "Get ticket detail with messages",
-        "description": "Scoped to req.user.id. Messages ordered ASC. sender_name resolved via CASE: Users table for sender_role='user', Admins table otherwise.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": {
-          "200": { "description": "Ticket + messages", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/SupportTicketDetail" } } }] } } } },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Ticket not found or belongs to another user" }
-        }
-      }
-    },
-    "/support/tickets/{id}/reply": {
-      "post": {
-        "tags": ["Support"],
-        "summary": "Reply to a ticket",
-        "description": "Inserts SupportMessages with sender_role='user'. Sets ticket status='in_progress'. Fails if ticket status='closed'.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["message"], "properties": { "message": { "type": "string" } } } } }
-        },
-        "responses": {
-          "200": { "description": "Reply sent" },
-          "400": { "description": "Validation error" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Ticket not found, closed, or not owned by user" }
-        }
-      }
-    },
+    "/refunds/request": { "post": { "tags": ["Refunds"], "summary": "Request refund", "responses": { "200": { "description": "Requested" } } } },
+    "/refunds/my-refunds": { "get": { "tags": ["Refunds"], "summary": "My refunds", "responses": { "200": { "description": "Refunds" } } } },
     "/admin/auth/login": {
-      "post": {
-        "tags": ["Admin - Auth"],
-        "summary": "Admin login",
-        "description": "bcrypt compare against Admins.password_hash. JWT payload: {id, type:'admin', role}. Expires 12h. Updates last_login. Strips password_hash from response.",
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["email","password"], "properties": { "email": { "type": "string", "format": "email" }, "password": { "type": "string" } } } } }
-        },
-        "responses": {
-          "200": { "description": "Admin logged in", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "admin": { "type": "object", "properties": { "id": { "type": "integer" }, "name": { "type": "string" }, "email": { "type": "string" }, "role": { "type": "string" }, "location_id": { "type": "integer", "nullable": true }, "is_active": { "type": "boolean" } } }, "token": { "type": "string", "description": "12-hour admin JWT" } } } } }] } } } },
-          "400": { "description": "Validation error" },
-          "401": { "description": "Invalid credentials or admin inactive" }
-        }
+      "post": { "tags": ["Admin"], "summary": "Admin login — returns token + admin info with location_name",
+        "security": [],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["email","password"],
+          "properties": { "email": { "type": "string" }, "password": { "type": "string" }, "location_id": { "type": "integer", "description": "Optional for super_admin to scope to a branch" } } } } } },
+        "responses": { "200": { "description": "token + admin object including location_id and location_name" } }
       }
     },
-    "/admin/dashboard": {
-      "get": {
-        "tags": ["Admin - Dashboard"],
-        "summary": "Get dashboard KPIs",
-        "description": "Parallel queries: today orders+revenue (paid only), total all-time revenue, new users today, pending order count, top 5 products by order_count (paid orders).",
-        "security": [{ "BearerAuth": [] }],
-        "responses": {
-          "200": { "description": "Dashboard stats", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/DashboardStats" } } }] } } } },
-          "401": { "description": "Unauthorized" },
-          "403": { "description": "Not an admin token (type != 'admin')" }
-        }
-      }
-    },
+    "/admin/dashboard": { "get": { "tags": ["Admin"], "summary": "Dashboard KPIs (scoped to admin location if set)", "responses": { "200": { "description": "KPI data" } } } },
     "/admin/dashboard/reports": {
-      "get": {
-        "tags": ["Admin - Dashboard"],
-        "summary": "Get period-grouped revenue report (last 30 days)",
-        "description": "Grouping: daily=DATE(created_at), weekly=WEEK(created_at), monthly=DATE_FORMAT('%Y-%m'). Returns total_orders, revenue, delivered, cancelled per period.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [
-          { "in": "query", "name": "period", "schema": { "type": "string", "enum": ["daily","weekly","monthly"], "default": "daily" } }
-        ],
-        "responses": {
-          "200": { "description": "Report rows (DESC by period)", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "$ref": "#/components/schemas/ReportRow" } } } }] } } } },
-          "401": { "description": "Unauthorized" }
-        }
+      "get": { "tags": ["Admin"], "summary": "Revenue reports",
+        "parameters": [{ "in": "query", "name": "period", "schema": { "type": "string", "enum": ["daily","weekly","monthly"] } }],
+        "responses": { "200": { "description": "Report rows" } }
       }
     },
     "/admin/orders": {
-      "get": {
-        "tags": ["Admin - Orders"],
-        "summary": "Get all orders (admin, paginated)",
-        "description": "Optional filters: status, location_id. Joins Users (user_name, user_mobile) and Locations (location_name). Newest first.",
-        "security": [{ "BearerAuth": [] }],
+      "get": { "tags": ["Admin"], "summary": "List all orders (auto-filtered by admin location)",
         "parameters": [
-          { "in": "query", "name": "status", "schema": { "type": "string", "enum": ["pending","confirmed","preparing","out_for_delivery","delivered","cancelled"] } },
-          { "in": "query", "name": "location_id", "schema": { "type": "integer" } },
-          { "in": "query", "name": "page", "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit", "schema": { "type": "integer", "default": 20 } }
+          { "in": "query", "name": "status",      "schema": { "type": "string" } },
+          { "in": "query", "name": "location_id", "schema": { "type": "integer" }, "description": "Only used by super_admin (others use their own location)" }
         ],
-        "responses": {
-          "200": { "description": "Paginated admin orders", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/AdminOrderRow" } }, "pagination": { "$ref": "#/components/schemas/Pagination" } } } } } },
-          "401": { "description": "Unauthorized" }
-        }
+        "responses": { "200": { "description": "Paginated orders" } }
       }
     },
     "/admin/orders/{id}/status": {
-      "put": {
-        "tags": ["Admin - Orders"],
-        "summary": "Update order status with transition validation",
-        "description": "Valid transitions enforced:\n- pending → confirmed | cancelled\n- confirmed → preparing | cancelled\n- preparing → out_for_delivery | cancelled\n- out_for_delivery → delivered\n- delivered → refund_requested\n- cancelled → (none)\n\nInserts OrderStatusHistory row with changed_by_role='admin'.",
-        "security": [{ "BearerAuth": [] }],
+      "put": { "tags": ["Admin"], "summary": "Update order status",
         "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["status"], "properties": {
-            "status": { "type": "string", "enum": ["confirmed","preparing","out_for_delivery","delivered","cancelled","refund_requested"] },
-            "note": { "type": "string", "nullable": true }
-          }}}}
-        },
-        "responses": {
-          "200": { "description": "Status updated" },
-          "400": { "description": "Invalid transition (e.g. delivered → confirmed not allowed)" },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Order not found" }
-        }
-      }
-    },
-    "/admin/orders/{id}/invoice": {
-      "get": {
-        "tags": ["Admin - Orders"],
-        "summary": "Get invoice for an order",
-        "description": "Joins Orders + Users + Locations. Items fetched with GROUP_CONCAT of topping names. CGST = SGST = tax_amount/2. Not scoped to user — admin can view any order.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": {
-          "200": { "description": "Invoice data", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/InvoiceResponse" } } }] } } } },
-          "401": { "description": "Unauthorized" },
-          "404": { "description": "Order not found" }
-        }
-      }
-    },
-    "/admin/users": {
-      "get": {
-        "tags": ["Admin - Users"],
-        "summary": "Get all users (paginated)",
-        "description": "Optional search (LIKE on name, email, mobile), is_blocked filter. Returns: id, name, email, mobile, is_verified, is_active, is_blocked, created_at, last_login. Newest first.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [
-          { "in": "query", "name": "search", "schema": { "type": "string" } },
-          { "in": "query", "name": "is_blocked", "schema": { "type": "boolean" } },
-          { "in": "query", "name": "page", "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit", "schema": { "type": "integer", "default": 20 } }
-        ],
-        "responses": {
-          "200": { "description": "Paginated users", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/AdminUserRow" } }, "pagination": { "$ref": "#/components/schemas/Pagination" } } } } } },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
-    "/admin/users/{id}/block": {
-      "put": {
-        "tags": ["Admin - Users"],
-        "summary": "Block or unblock a user",
-        "description": "Requires super_admin or admin role (checked by requireRole middleware). Sets is_blocked=1 or 0.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["is_blocked"], "properties": { "is_blocked": { "type": "boolean" } } } } }
-        },
-        "responses": {
-          "200": { "description": "User blocked/unblocked" },
-          "401": { "description": "Unauthorized" },
-          "403": { "description": "Insufficient role — must be admin or super_admin" }
-        }
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" }, "note": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Updated" } }
       }
     },
     "/admin/menu/products": {
-      "post": {
-        "tags": ["Admin - Menu"],
-        "summary": "Create a new product",
-        "description": "Requires super_admin or admin role. Inserts into Products. If sizes array provided, inserts ProductSizes rows. Returns product_id.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["name","base_price","category_id"], "properties": {
-            "category_id": { "type": "integer" },
-            "name": { "type": "string" },
-            "description": { "type": "string", "nullable": true },
-            "base_price": { "type": "number" },
-            "is_veg": { "type": "boolean", "default": true },
-            "is_featured": { "type": "boolean", "default": false },
-            "sizes": { "type": "array", "nullable": true, "items": { "type": "object", "required": ["size_name","size_code","price"], "properties": { "size_name": { "type": "string", "example": "Medium" }, "size_code": { "type": "string", "example": "M" }, "price": { "type": "number" } } } }
-          }}}}
-        },
-        "responses": {
-          "201": { "description": "Product created", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "product_id": { "type": "integer" } } } } }] } } } },
-          "400": { "description": "Validation error" },
-          "401": { "description": "Unauthorized" },
-          "403": { "description": "Insufficient role" }
-        }
+      "get": { "tags": ["Admin Menu"], "summary": "Get ALL products including unavailable (admin only). Returns location_available when admin is location-scoped.",
+        "parameters": [
+          { "in": "query", "name": "show_unavailable", "schema": { "type": "boolean" }, "description": "true = include globally disabled products" },
+          { "in": "query", "name": "search",           "schema": { "type": "string" } },
+          { "in": "query", "name": "category_id",      "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Products with location_available field" } }
+      },
+      "post": { "tags": ["Admin Menu"], "summary": "Create product",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name","base_price","category_id"],
+          "properties": { "name": { "type": "string" }, "base_price": { "type": "number" }, "category_id": { "type": "integer" }, "is_veg": { "type": "boolean" }, "is_featured": { "type": "boolean" }, "description": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Created with product_id" } }
       }
     },
     "/admin/menu/products/{id}": {
-      "put": {
-        "tags": ["Admin - Menu"],
-        "summary": "Update a product",
-        "description": "Requires super_admin or admin role. All fields optional via IFNULL. Booleans (is_veg, is_featured, is_available) must be explicitly passed as true/false.",
-        "security": [{ "BearerAuth": [] }],
+      "put": { "tags": ["Admin Menu"], "summary": "Update product globally",
         "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": {
-          "name": { "type": "string" },
-          "description": { "type": "string" },
-          "base_price": { "type": "number" },
-          "is_veg": { "type": "boolean" },
-          "is_featured": { "type": "boolean" },
-          "is_available": { "type": "boolean" }
-        }}}}},
-        "responses": {
-          "200": { "description": "Product updated" },
-          "401": { "description": "Unauthorized" },
-          "403": { "description": "Insufficient role" }
-        }
+        "responses": { "200": { "description": "Updated" } }
       },
-      "delete": {
-        "tags": ["Admin - Menu"],
-        "summary": "Soft-delete product (set is_available=0)",
-        "description": "Requires super_admin or admin role. Does NOT hard-delete. Sets is_available=0 so the product disappears from all GET /menu/products queries.",
-        "security": [{ "BearerAuth": [] }],
+      "delete": { "tags": ["Admin Menu"], "summary": "Soft-delete product (hides from all menus)",
         "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": {
-          "200": { "description": "Product removed from menu" },
-          "401": { "description": "Unauthorized" },
-          "403": { "description": "Insufficient role" }
-        }
+        "responses": { "200": { "description": "Removed" } }
+      }
+    },
+    "/admin/menu/products/{id}/image": {
+      "post": { "tags": ["Admin Menu"], "summary": "Upload product image",
+        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "type": "object", "properties": { "image": { "type": "string", "format": "binary" } } } } } },
+        "responses": { "200": { "description": "image_url returned" } }
+      }
+    },
+    "/admin/menu/products/{id}/location-availability": {
+      "put": { "tags": ["Admin Menu"],
+        "summary": "Toggle product on/off at a location. Location-scoped admin uses their own location. Super-admin must pass location_id in body.",
+        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["is_available"],
+          "properties": { "is_available": { "type": "boolean" }, "location_id": { "type": "integer", "description": "Required for super_admin only" } } } } } },
+        "responses": { "200": { "description": "Availability updated" } }
+      }
+    },
+    "/admin/menu/products/{id}/availability-matrix": {
+      "get": { "tags": ["Admin Menu"],
+        "summary": "Get availability status for this product across ALL locations (super_admin view)",
+        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "Array of {location_id, location_name, is_available}" } }
+      }
+    },
+    "/admin/users": { "get": { "tags": ["Admin"], "summary": "List users", "responses": { "200": { "description": "Users" } } } },
+    "/admin/users/{id}/block": {
+      "put": { "tags": ["Admin"], "summary": "Block / unblock user",
+        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "is_blocked": { "type": "boolean" } } } } } },
+        "responses": { "200": { "description": "Done" } }
       }
     },
     "/admin/coupons": {
-      "post": {
-        "tags": ["Admin - Coupons"],
-        "summary": "Create a coupon",
-        "description": "Requires super_admin or admin role. code is uppercased. max_discount only relevant for percentage type to cap rupee value.",
-        "security": [{ "BearerAuth": [] }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["code","discount_type","discount_value","valid_from","valid_until"], "properties": {
-            "code": { "type": "string", "example": "PIZZA20" },
-            "description": { "type": "string", "nullable": true },
-            "discount_type": { "type": "string", "enum": ["percentage","flat"] },
-            "discount_value": { "type": "number", "example": 20 },
-            "min_order_value": { "type": "number", "default": 0 },
-            "max_discount": { "type": "number", "nullable": true, "description": "Cap for percentage discounts" },
-            "usage_limit": { "type": "integer", "nullable": true, "description": "null = unlimited" },
-            "valid_from": { "type": "string", "format": "date-time" },
-            "valid_until": { "type": "string", "format": "date-time" }
-          }}}}
-        },
-        "responses": {
-          "201": { "description": "Coupon created" },
-          "400": { "description": "Validation error" },
-          "401": { "description": "Unauthorized" },
-          "403": { "description": "Insufficient role" }
-        }
+      "post": { "tags": ["Admin"], "summary": "Create coupon",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "Created" } }
       }
     },
-    "/admin/refunds": {
-      "get": {
-        "tags": ["Admin - Refunds"],
-        "summary": "Get all refund requests",
-        "description": "Optional status filter. Joins Orders (order_number) and Users (user_name, user_email). Ordered by requested_at DESC.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [
-          { "in": "query", "name": "status", "schema": { "type": "string", "enum": ["pending","processing","completed","failed"] } }
-        ],
-        "responses": {
-          "200": { "description": "Refund list with user info", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/SuccessEnvelope" }, { "type": "object", "properties": { "data": { "type": "array", "items": { "allOf": [{ "$ref": "#/components/schemas/Refund" }, { "type": "object", "properties": { "user_name": { "type": "string" }, "user_email": { "type": "string" } } }] } } } }] } } } },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
+    "/admin/refunds": { "get": { "tags": ["Admin"], "summary": "All refunds", "responses": { "200": { "description": "Refunds" } } } },
     "/admin/refunds/{id}/process": {
-      "post": {
-        "tags": ["Admin - Refunds"],
-        "summary": "Approve or reject a pending refund",
-        "description": "Requires super_admin or admin role. Only works on status=pending.\n\nreject: sets status=failed, records processed_by, notes.\n\napprove: calls PayU cancel_refund_transaction API (gets OAuth2 token first), sets status=processing, updates Orders.payment_status=refunded.",
-        "security": [{ "BearerAuth": [] }],
+      "post": { "tags": ["Admin"], "summary": "Process refund",
         "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["action"], "properties": {
-            "action": { "type": "string", "enum": ["approve","reject"] },
-            "notes": { "type": "string", "nullable": true }
-          }}}}
-        },
-        "responses": {
-          "200": { "description": "Refund approved or rejected" },
-          "401": { "description": "Unauthorized" },
-          "403": { "description": "Insufficient role" },
-          "404": { "description": "Refund not found or already processed (not pending)" }
-        }
+        "responses": { "200": { "description": "Processed" } }
       }
     },
-    "/admin/support/tickets": {
-      "get": {
-        "tags": ["Admin - Support"],
-        "summary": "Get all support tickets (admin view, paginated)",
-        "description": "Optional filters: status, priority. Joins Users (user_name, user_email) and Orders (order_number). Ordered by priority DESC then created_at ASC.",
-        "security": [{ "BearerAuth": [] }],
-        "parameters": [
-          { "in": "query", "name": "status", "schema": { "type": "string", "enum": ["open","in_progress","resolved","closed"] } },
-          { "in": "query", "name": "priority", "schema": { "type": "string" } },
-          { "in": "query", "name": "page", "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit", "schema": { "type": "integer", "default": 20 } }
-        ],
-        "responses": {
-          "200": { "description": "Paginated tickets with user info", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "allOf": [{ "$ref": "#/components/schemas/SupportTicketSummary" }, { "type": "object", "properties": { "user_name": { "type": "string" }, "user_email": { "type": "string" } } }] } }, "pagination": { "$ref": "#/components/schemas/Pagination" } } } } } },
-          "401": { "description": "Unauthorized" }
-        }
-      }
-    },
+    "/admin/support/tickets": { "get": { "tags": ["Admin"], "summary": "All support tickets", "responses": { "200": { "description": "Tickets" } } } },
     "/admin/support/tickets/{id}/reply": {
-      "post": {
-        "tags": ["Admin - Support"],
-        "summary": "Reply to a ticket as admin",
-        "description": "Inserts SupportMessages with sender_role='admin', sender_id=req.admin.id. Optional status update — if resolved or closed, also sets resolved_at=NOW().",
-        "security": [{ "BearerAuth": [] }],
+      "post": { "tags": ["Admin"], "summary": "Reply to ticket",
         "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": {
-          "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["message"], "properties": {
-            "message": { "type": "string" },
-            "status": { "type": "string", "enum": ["open","in_progress","resolved","closed"], "nullable": true, "description": "Optional — update ticket status alongside reply" }
-          }}}}
-        },
-        "responses": {
-          "200": { "description": "Reply sent" },
-          "400": { "description": "Validation error" },
-          "401": { "description": "Unauthorized" }
-        }
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "message": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Replied" } }
       }
     }
   }
