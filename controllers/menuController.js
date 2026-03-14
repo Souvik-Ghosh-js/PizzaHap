@@ -10,16 +10,31 @@ const getCategories = async (req, res, next) => {
 
 const getProducts = async (req, res, next) => {
   try {
-    const { category_id, is_veg, search, page = 1, limit = 20 } = req.query;
+    const { category_id, is_veg, search } = req.query;
+    const page   = parseInt(req.query.page)  || 1;
+    const limit  = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
+
     let whereClause = `WHERE p.is_available = 1`;
     const params = [];
 
-    if (category_id) { whereClause += ` AND p.category_id = ?`; params.push(parseInt(category_id)); }
-    if (is_veg !== undefined) { whereClause += ` AND p.is_veg = ?`; params.push(is_veg === 'true' ? 1 : 0); }
-    if (search) { whereClause += ` AND (p.name LIKE ? OR p.description LIKE ?)`; params.push(`%${search}%`, `%${search}%`); }
+    if (category_id) {
+      whereClause += ` AND p.category_id = ?`;
+      params.push(parseInt(category_id));
+    }
+    if (is_veg !== undefined) {
+      whereClause += ` AND p.is_veg = ?`;
+      params.push(is_veg === 'true' ? 1 : 0);
+    }
+    if (search) {
+      whereClause += ` AND (p.name LIKE ? OR p.description LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`);
+    }
 
-    const countResult = await query(`SELECT COUNT(*) as total FROM Products p ${whereClause}`, params);
+    const countResult = await query(
+      `SELECT COUNT(*) as total FROM Products p ${whereClause}`,
+      params
+    );
     const total = countResult[0].total;
 
     const result = await query(
@@ -27,7 +42,7 @@ const getProducts = async (req, res, next) => {
        FROM Products p LEFT JOIN Categories c ON p.category_id = c.id
        ${whereClause} ORDER BY p.sort_order, p.name
        LIMIT ? OFFSET ?`,
-      [...params, parseInt(limit), offset]
+      [...params, limit, offset]
     );
     return paginated(res, result, total, page, limit);
   } catch (err) { next(err); }
@@ -56,7 +71,8 @@ const getProductById = async (req, res, next) => {
     ]);
 
     const avgRating = ratings.length
-      ? (ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1) : null;
+      ? (ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)
+      : null;
 
     return success(res, {
       ...product, sizes, crusts, toppings,
@@ -81,7 +97,10 @@ const getToppings = async (req, res, next) => {
     const { is_veg } = req.query;
     let whereClause = 'WHERE is_available = 1';
     const params = [];
-    if (is_veg !== undefined) { whereClause += ' AND is_veg = ?'; params.push(is_veg === 'true' ? 1 : 0); }
+    if (is_veg !== undefined) {
+      whereClause += ' AND is_veg = ?';
+      params.push(is_veg === 'true' ? 1 : 0);
+    }
     const result = await query(`SELECT * FROM Toppings ${whereClause} ORDER BY sort_order`, params);
     return success(res, result);
   } catch (err) { next(err); }
