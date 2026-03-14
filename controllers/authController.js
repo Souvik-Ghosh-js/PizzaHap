@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/db');
-const { sendMobileOTP, resendMobileOTP, verifyMobileOTP, normalizeMobile } = require('../services/otpService');
+const { sendEmailOTP, resendEmailOTP, verifyEmailOTP, normalizeEmail } = require('../services/otpService');
 const { success, created, badRequest, unauthorized, conflict, notFound } = require('../utils/response');
 const logger = require('../utils/logger');
 
@@ -22,67 +22,78 @@ const saveRefreshToken = async (userId, refreshToken) => {
   );
 };
 
+// ─── MASK EMAIL FOR RESPONSE ──────────────────────────────────────
+// e.g. "us****@gmail.com"
+const maskEmail = (email) => {
+  const [local, domain] = email.split('@');
+  const visible = local.slice(0, 2);
+  return `${visible}****@${domain}`;
+};
+
+// POST /auth/send-otp
+// Body: { email }
 const sendOTP = async (req, res, next) => {
   try {
-    const { mobile } = req.body;
-    const result = await sendMobileOTP(mobile);
+    const { email } = req.body;
+    const result = await sendEmailOTP(email);
     if (!result.success) return badRequest(res, result.message || 'Failed to send OTP');
-    return success(res, {}, `OTP sent to ${normalizeMobile(mobile).replace(/(\d{2})\d{6}(\d{2})/, '$1xxxxxx$2')}`);
+    return success(res, {}, `OTP sent to ${maskEmail(normalizeEmail(email))}`);
   } catch (err) { next(err); }
 };
 
+// POST /auth/resend-otp
+// Body: { email }
 const resendOTP = async (req, res, next) => {
   try {
-    const { mobile, type = 'text' } = req.body;
-    const result = await resendMobileOTP(mobile, type);
+    const { email } = req.body;
+    const result = await resendEmailOTP(email);
     if (!result.success) return badRequest(res, result.message || 'Failed to resend OTP');
     return success(res, {}, 'OTP resent successfully');
   } catch (err) { next(err); }
 };
 
+// POST /auth/register
+// Body: { name, email, otp, mobile? }
 const register = async (req, res, next) => {
   try {
-    const { name, mobile, otp, email } = req.body;
-    const normalizedMobile = normalizeMobile(mobile);
+    const { name, email, otp, mobile } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
-    const otpResult = await verifyMobileOTP(mobile, otp);
+    const otpResult = await verifyEmailOTP(email, otp);
     if (!otpResult.valid) return badRequest(res, otpResult.reason || 'Invalid or expired OTP');
 
-    const existing = await query(`SELECT id FROM Users WHERE mobile = ?`, [normalizedMobile]);
-    if (existing.length) return conflict(res, 'Mobile number already registered. Please login.');
-
-    if (email) {
-      const emailCheck = await query(`SELECT id FROM Users WHERE email = ?`, [email]);
-      if (emailCheck.length) return conflict(res, 'Email already in use.');
-    }
+    const existing = await query(`SELECT id FROM Users WHERE email = ?`, [normalizedEmail]);
+    if (existing.length) return conflict(res, 'Email already registered. Please login.');
 
     const result = await query(
-      `INSERT INTO Users (name, mobile, email, is_verified) VALUES (?, ?, ?, 1)`,
-      [name, normalizedMobile, email || null]
+      `INSERT INTO Users (name, email, mobile, is_verified) VALUES (?, ?, ?, 1)`,
+      [name, normalizedEmail, mobile || null]
     );
-    const user = { id: result.insertId, name, mobile: normalizedMobile, email };
+    const user = { id: result.insertId, name, email: normalizedEmail, mobile: mobile || null };
 
     const { accessToken, refreshToken } = generateTokens(user.id);
     await saveRefreshToken(user.id, refreshToken);
 
-    logger.info(`New user registered: ${normalizedMobile}`);
+    logger.info(`New user registered: ${normalizedEmail}`);
     return created(res, { user, accessToken, refreshToken }, 'Registration successful');
   } catch (err) { next(err); }
 };
 
+// POST /auth/login
+// Body: { email, otp }
 const login = async (req, res, next) => {
   try {
-    const { mobile, otp } = req.body;
-    const normalizedMobile = normalizeMobile(mobile);
+    const { email, otp } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
-    const otpResult = await verifyMobileOTP(mobile, otp);
+    const otpResult = await verifyEmailOTP(email, otp);
     if (!otpResult.valid) return badRequest(res, otpResult.reason || 'Invalid or expired OTP');
 
     const result = await query(
-      `SELECT id, name, email, mobile, is_verified, is_active, is_blocked FROM Users WHERE mobile = ?`,
-      [normalizedMobile]
+      `SELECT id, name, email, mobile, is_verified, is_active, is_blocked FROM Users WHERE email = ?`,
+      [normalizedEmail]
     );
-    if (!result.length) return notFound(res, 'Mobile number not registered. Please register first.');
+    if (!result.length) return notFound(res, 'Email not registered. Please register first.');
 
     const user = result[0];
     if (user.is_blocked) return unauthorized(res, 'Account blocked. Please contact support.');
@@ -93,11 +104,12 @@ const login = async (req, res, next) => {
     const { accessToken, refreshToken } = generateTokens(user.id);
     await saveRefreshToken(user.id, refreshToken);
 
-    logger.info(`User logged in: ${normalizedMobile}`);
+    logger.info(`User logged in: ${normalizedEmail}`);
     return success(res, { user, accessToken, refreshToken }, 'Login successful');
   } catch (err) { next(err); }
 };
 
+// POST /auth/refresh-token
 const refreshToken = async (req, res, next) => {
   try {
     const { refreshToken: token } = req.body;
@@ -121,6 +133,7 @@ const refreshToken = async (req, res, next) => {
   }
 };
 
+// POST /auth/logout
 const logout = async (req, res, next) => {
   try {
     const { refreshToken: token } = req.body;
@@ -129,6 +142,7 @@ const logout = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// GET /auth/me  (protected)
 const getMe = async (req, res, next) => {
   try {
     const result = await query(
@@ -144,20 +158,21 @@ const getMe = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// PUT /auth/profile  (protected)
 const updateProfile = async (req, res, next) => {
   try {
-    const { name, email, address, latitude, longitude, preferred_location_id } = req.body;
+    const { name, mobile, address, latitude, longitude, preferred_location_id } = req.body;
     await query(
       `UPDATE Users SET
         name = IFNULL(?, name),
-        email = IFNULL(?, email),
+        mobile = IFNULL(?, mobile),
         address = IFNULL(?, address),
         latitude = IFNULL(?, latitude),
         longitude = IFNULL(?, longitude),
         preferred_location_id = IFNULL(?, preferred_location_id),
         updated_at = NOW()
        WHERE id = ?`,
-      [name || null, email || null, address || null, latitude || null, longitude || null, preferred_location_id || null, req.user.id]
+      [name || null, mobile || null, address || null, latitude || null, longitude || null, preferred_location_id || null, req.user.id]
     );
     return success(res, {}, 'Profile updated');
   } catch (err) { next(err); }

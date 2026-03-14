@@ -7,11 +7,12 @@ const {
 const { authenticate } = require('../middlewares/auth');
 const { validate } = require('../middlewares/errorHandler');
 
-// Mobile validator reused across routes
-const mobileValidator = body('mobile')
+// Reusable validators
+const emailValidator = body('email')
   .trim()
-  .notEmpty().withMessage('Mobile number is required')
-  .matches(/^[6-9]\d{9}$/).withMessage('Enter a valid 10-digit Indian mobile number');
+  .notEmpty().withMessage('Email is required')
+  .isEmail().withMessage('Enter a valid email address')
+  .normalizeEmail();
 
 const otpValidator = body('otp')
   .trim()
@@ -19,28 +20,27 @@ const otpValidator = body('otp')
   .isNumeric().withMessage('OTP must be numeric');
 
 // POST /auth/send-otp
-// Body: { mobile: "9876543210" }
-router.post('/send-otp', [mobileValidator], validate, sendOTP);
+// Body: { email }
+router.post('/send-otp', [emailValidator], validate, sendOTP);
 
 // POST /auth/resend-otp
-// Body: { mobile: "9876543210", type?: "text" | "voice" }
-router.post('/resend-otp', [
-  mobileValidator,
-  body('type').optional().isIn(['text', 'voice']).withMessage('type must be text or voice'),
-], validate, resendOTP);
+// Body: { email }
+router.post('/resend-otp', [emailValidator], validate, resendOTP);
 
 // POST /auth/register
-// Body: { name, mobile, otp, email? }
+// Body: { name, email, otp, mobile? }
 router.post('/register', [
   body('name').trim().notEmpty().withMessage('Name is required'),
-  mobileValidator,
+  emailValidator,
   otpValidator,
-  body('email').optional().isEmail().normalizeEmail().withMessage('Enter a valid email address'),
+  body('mobile')
+    .optional()
+    .matches(/^[6-9]\d{9}$/).withMessage('Enter a valid 10-digit Indian mobile number'),
 ], validate, register);
 
 // POST /auth/login
-// Body: { mobile, otp }
-router.post('/login', [mobileValidator, otpValidator], validate, login);
+// Body: { email, otp }
+router.post('/login', [emailValidator, otpValidator], validate, login);
 
 // POST /auth/refresh-token
 router.post('/refresh-token', [
@@ -56,7 +56,9 @@ router.get('/me', authenticate, getMe);
 // PUT /auth/profile  (protected)
 router.put('/profile', authenticate, [
   body('name').optional().trim().notEmpty().withMessage('Name cannot be empty'),
-  body('email').optional().isEmail().normalizeEmail().withMessage('Enter a valid email'),
+  body('mobile')
+    .optional()
+    .matches(/^[6-9]\d{9}$/).withMessage('Enter a valid 10-digit Indian mobile number'),
   body('preferred_location_id').optional().isInt().withMessage('Invalid location ID'),
 ], validate, updateProfile);
 
