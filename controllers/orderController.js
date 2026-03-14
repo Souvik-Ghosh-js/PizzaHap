@@ -141,13 +141,14 @@ const placeOrder = async (req, res, next) => {
       const newOrderId = orderResult.insertId;
 
       for (const item of orderItems) {
+        let unit_price = item.unit_price.toFixed(2);
         const [itemResult] = await conn.execute(
           `INSERT INTO OrderItems (order_id, product_id, product_name, size_id, size_name,
             crust_id, crust_name, quantity, unit_price, total_price, special_instructions)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [newOrderId, item.product_id, item.product.name, item.size_id, item.product.size_name,
            item.crust_id || null, item.product.crust_name || null, item.quantity || 1,
-           item.unit_price, item.total_price, item.special_instructions || null]
+           unit_price, item.total_price, item.special_instructions || null]
         );
         const orderItemId = itemResult.insertId;
         for (const topping of item.toppings) {
