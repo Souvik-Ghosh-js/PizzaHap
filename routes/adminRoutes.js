@@ -6,41 +6,42 @@ const {
   adminGetOrders, updateOrderStatus,
   adminGetUsers, blockUser,
   createProduct, updateProduct, deleteProduct,
-  createCoupon,
+  createCoupon, getAdminLocations,
 } = require('../controllers/adminController');
 const { getAllRefunds, processRefund } = require('../controllers/refundController');
 const { adminGetAllTickets, adminReplyTicket } = require('../controllers/supportController');
+const { uploadProductImage: uploadMiddleware } = require('../middlewares/upload');
+const { uploadProductImage, setProductLocationAvailability, getProductLocationOverrides } = require('../controllers/menuController');
+const { generateInvoice } = require('../controllers/miscController');
 const { authenticateAdmin, requireRole } = require('../middlewares/auth');
 const { validate } = require('../middlewares/errorHandler');
 
-// Public admin auth
+// ─── PUBLIC ───────────────────────────────────────────────────────
 router.post('/auth/login', [
   body('email').isEmail(),
   body('password').notEmpty(),
 ], validate, adminLogin);
 
-// Protected admin routes
+// All routes below require admin JWT
 router.use(authenticateAdmin);
 
-// Dashboard
+// ─── LOCATIONS ────────────────────────────────────────────────────
+router.get('/locations', getAdminLocations);
+
+// ─── DASHBOARD ────────────────────────────────────────────────────
 router.get('/dashboard', getDashboard);
 router.get('/dashboard/reports', getReports);
 
-// Order management
+// ─── ORDERS ───────────────────────────────────────────────────────
 router.get('/orders', adminGetOrders);
-router.put('/orders/:id/status', [
-  body('status').notEmpty(),
-], validate, updateOrderStatus);
-
-// Invoice (admin view)
-const { generateInvoice } = require('../controllers/miscController');
+router.put('/orders/:id/status', [body('status').notEmpty()], validate, updateOrderStatus);
 router.get('/orders/:id/invoice', generateInvoice);
 
-// User management
+// ─── USERS ────────────────────────────────────────────────────────
 router.get('/users', adminGetUsers);
 router.put('/users/:id/block', requireRole('super_admin', 'admin'), blockUser);
 
-// Menu management
+// ─── MENU ─────────────────────────────────────────────────────────
 router.post('/menu/products', requireRole('super_admin', 'admin'), [
   body('name').trim().notEmpty(),
   body('base_price').isNumeric(),
@@ -49,7 +50,23 @@ router.post('/menu/products', requireRole('super_admin', 'admin'), [
 router.put('/menu/products/:id', requireRole('super_admin', 'admin'), updateProduct);
 router.delete('/menu/products/:id', requireRole('super_admin', 'admin'), deleteProduct);
 
-// Coupons
+// Product image upload — multipart/form-data, field name: "image"
+router.post(
+  '/menu/products/:id/image',
+  requireRole('super_admin', 'admin'),
+  uploadMiddleware.single('image'),
+  uploadProductImage
+);
+
+// Location-level product availability toggle
+router.post('/menu/location-availability', requireRole('super_admin', 'admin'), [
+  body('product_id').isInt(),
+  body('location_id').isInt(),
+  body('is_available').isBoolean(),
+], validate, setProductLocationAvailability);
+router.get('/menu/location-overrides', getProductLocationOverrides);
+
+// ─── COUPONS ──────────────────────────────────────────────────────
 router.post('/coupons', requireRole('super_admin', 'admin'), [
   body('code').trim().notEmpty(),
   body('discount_type').isIn(['percentage', 'flat']),
@@ -58,11 +75,11 @@ router.post('/coupons', requireRole('super_admin', 'admin'), [
   body('valid_until').isISO8601(),
 ], validate, createCoupon);
 
-// Refunds
+// ─── REFUNDS ──────────────────────────────────────────────────────
 router.get('/refunds', getAllRefunds);
 router.post('/refunds/:id/process', requireRole('super_admin', 'admin'), processRefund);
 
-// Support
+// ─── SUPPORT ──────────────────────────────────────────────────────
 router.get('/support/tickets', adminGetAllTickets);
 router.post('/support/tickets/:id/reply', [
   body('message').trim().notEmpty(),

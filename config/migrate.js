@@ -152,3 +152,27 @@ migrate().catch(err => {
   console.error('❌ Migration failed:', err);
   process.exit(1);
 });
+
+// Run after main migrations
+const migrateExtra = async () => {
+  const pool = getPool();
+  const extras = [
+    `CREATE TABLE IF NOT EXISTS ProductLocationOverrides (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      product_id INT NOT NULL,
+      location_id INT NOT NULL,
+      is_available TINYINT(1) DEFAULT 1,
+      updated_at DATETIME DEFAULT NOW(),
+      UNIQUE KEY uq_product_location (product_id, location_id),
+      FOREIGN KEY (product_id) REFERENCES Products(id) ON DELETE CASCADE,
+      FOREIGN KEY (location_id) REFERENCES Locations(id) ON DELETE CASCADE
+    )`,
+    `ALTER TABLE Users ADD COLUMN IF NOT EXISTS selected_location_id INT NULL,
+     ADD CONSTRAINT fk_user_location FOREIGN KEY IF NOT EXISTS (selected_location_id) REFERENCES Locations(id)`,
+  ];
+  for (const sql of extras) {
+    try { await pool.execute(sql); } catch(e) { /* already exists */ }
+  }
+  console.log('✅ Extra migrations done');
+};
+migrateExtra().catch(console.error);

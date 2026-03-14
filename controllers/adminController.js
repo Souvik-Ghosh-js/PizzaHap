@@ -1,8 +1,11 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/db');
-const { success, created, badRequest, notFound, paginated, unauthorized, conflict } = require('../utils/response');
+const { success, created, badRequest, notFound, paginated, unauthorized } = require('../utils/response');
 
+const toNum = (v) => parseFloat(v) || 0;
+
+// POST /admin/auth/login
 const adminLogin = async (req, res, next) => {
   try {
     const { email, password } = req.body;
@@ -16,35 +19,44 @@ const adminLogin = async (req, res, next) => {
     await query(`UPDATE Admins SET last_login = NOW() WHERE id = ?`, [admin.id]);
 
     const token = jwt.sign(
-      { id: admin.id, type: 'admin', role: admin.role },
+      { id: admin.id, type: 'admin', role: admin.role, location_id: admin.location_id },
       process.env.JWT_SECRET,
       { expiresIn: '12h' }
     );
 
     const { password_hash, ...adminData } = admin;
+    // Include location info
+    if (admin.location_id) {
+      const loc = await query(`SELECT * FROM Locations WHERE id = ?`, [admin.location_id]);
+      adminData.location = loc[0] || null;
+    }
     return success(res, { admin: adminData, token });
   } catch (err) { next(err); }
 };
 
+// GET /admin/dashboard
 const getDashboard = async (req, res, next) => {
   try {
+    // Scope to admin's location if not super_admin
+    const locationId = req.admin.role !== 'super_admin' ? req.admin.location_id : null;
+    const locFilter = locationId ? 'AND location_id = ?' : '';
+    const locParam = locationId ? [locationId] : [];
+
     const [todayOrders, totalRevenue, newUsers, pendingOrders, popularProducts] = await Promise.all([
       query(`SELECT COUNT(*) as count, IFNULL(SUM(total_amount),0) as revenue
-             FROM Orders WHERE DATE(created_at) = CURDATE() AND payment_status = 'paid'`),
-      query(`SELECT IFNULL(SUM(total_amount),0) as total FROM Orders WHERE payment_status = 'paid'`),
+             FROM Orders WHERE DATE(created_at) = CURDATE() AND payment_status = 'paid' ${locFilter}`, locParam),
+      query(`SELECT IFNULL(SUM(total_amount),0) as total FROM Orders WHERE payment_status = 'paid' ${locFilter}`, locParam),
       query(`SELECT COUNT(*) as count FROM Users WHERE DATE(created_at) = CURDATE()`),
-      query(`SELECT COUNT(*) as count FROM Orders WHERE status IN ('pending','confirmed','preparing')`),
-      query(`
-        SELECT p.name, p.image_url, COUNT(oi.id) as order_count, SUM(oi.total_price) as revenue
-        FROM OrderItems oi JOIN Products p ON oi.product_id = p.id
-        JOIN Orders o ON oi.order_id = o.id AND o.payment_status = 'paid'
-        GROUP BY p.id, p.name, p.image_url ORDER BY order_count DESC LIMIT 5
-      `),
+      query(`SELECT COUNT(*) as count FROM Orders WHERE status IN ('pending','confirmed','preparing') ${locFilter}`, locParam),
+      query(`SELECT p.name, p.image_url, COUNT(oi.id) as order_count, SUM(oi.total_price) as revenue
+             FROM OrderItems oi JOIN Products p ON oi.product_id = p.id
+             JOIN Orders o ON oi.order_id = o.id AND o.payment_status = 'paid' ${locationId ? 'AND o.location_id = ?' : ''}
+             GROUP BY p.id, p.name, p.image_url ORDER BY order_count DESC LIMIT 5`, locParam),
     ]);
 
     return success(res, {
-      today: { orders: todayOrders[0].count, revenue: todayOrders[0].revenue },
-      total_revenue: totalRevenue[0].total,
+      today: { orders: todayOrders[0].count, revenue: toNum(todayOrders[0].revenue) },
+      total_revenue: toNum(totalRevenue[0].total),
       new_users_today: newUsers[0].count,
       pending_orders: pendingOrders[0].count,
       popular_products: popularProducts,
@@ -52,56 +64,67 @@ const getDashboard = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// GET /admin/dashboard/reports
 const getReports = async (req, res, next) => {
   try {
     const { period = 'daily' } = req.query;
-    let groupBy;
-    if (period === 'daily') { groupBy = `DATE(created_at)`; }
-    else if (period === 'weekly') { groupBy = `WEEK(created_at)`; }
-    else { groupBy = `DATE_FORMAT(created_at, '%Y-%m')`; }
+    const locationId = req.admin.role !== 'super_admin' ? req.admin.location_id : null;
+    const locFilter = locationId ? 'AND location_id = ?' : '';
+    const locParam = locationId ? [locationId] : [];
 
-    const result = await query(`
-      SELECT ${groupBy} as period,
-             COUNT(*) as total_orders,
-             IFNULL(SUM(total_amount),0) as revenue,
-             COUNT(CASE WHEN status = 'delivered' THEN 1 END) as delivered,
-             COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled
-      FROM Orders
-      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-      GROUP BY ${groupBy}
-      ORDER BY period DESC
-    `);
+    let groupBy;
+    if (period === 'daily') groupBy = `DATE(created_at)`;
+    else if (period === 'weekly') groupBy = `WEEK(created_at)`;
+    else groupBy = `DATE_FORMAT(created_at, '%Y-%m')`;
+
+    const result = await query(
+      `SELECT ${groupBy} as period,
+              COUNT(*) as total_orders,
+              IFNULL(SUM(total_amount),0) as revenue,
+              COUNT(CASE WHEN status = 'delivered' THEN 1 END) as delivered,
+              COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled
+       FROM Orders
+       WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) ${locFilter}
+       GROUP BY ${groupBy} ORDER BY period DESC`,
+      locParam
+    );
     return success(res, result);
   } catch (err) { next(err); }
 };
 
+// GET /admin/orders
 const adminGetOrders = async (req, res, next) => {
   try {
-    const { status, location_id } = req.query;
-    const page   = Math.max(1, parseInt(req.query.page)  || 1);
-    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const { status } = req.query;
+    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
+
+    // Scope by admin's location
+    const adminLocationId = req.admin.role !== 'super_admin' ? req.admin.location_id : null;
+    const requestedLocationId = req.query.location_id ? parseInt(req.query.location_id) : null;
+    const effectiveLocationId = adminLocationId || requestedLocationId;
 
     let whereClause = 'WHERE 1=1';
     const params = [];
     if (status) { whereClause += ' AND o.status = ?'; params.push(status); }
-    if (location_id) { whereClause += ' AND o.location_id = ?'; params.push(parseInt(location_id)); }
+    if (effectiveLocationId) { whereClause += ' AND o.location_id = ?'; params.push(effectiveLocationId); }
 
     const countRes = await query(`SELECT COUNT(*) as total FROM Orders o ${whereClause}`, params);
     const result = await query(
-      `SELECT o.*, u.name as user_name, u.mobile as user_mobile, l.name as location_name
+      `SELECT o.*, u.name as user_name, u.mobile as user_mobile, u.email as user_email,
+              l.name as location_name
        FROM Orders o
        LEFT JOIN Users u ON o.user_id = u.id
        LEFT JOIN Locations l ON o.location_id = l.id
-       ${whereClause}
-       ORDER BY o.created_at DESC
-       LIMIT ${limit} OFFSET ${offset}`,
+       ${whereClause} ORDER BY o.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
       params
     );
     return paginated(res, result, countRes[0].total, page, limit);
   } catch (err) { next(err); }
 };
 
+// PUT /admin/orders/:id/status
 const updateOrderStatus = async (req, res, next) => {
   try {
     const { status, note } = req.body;
@@ -113,15 +136,12 @@ const updateOrderStatus = async (req, res, next) => {
       delivered: ['refund_requested'],
       cancelled: [],
     };
-
     const orderResult = await query(`SELECT status FROM Orders WHERE id = ?`, [req.params.id]);
     if (!orderResult.length) return notFound(res, 'Order not found');
     const current = orderResult[0].status;
-
     if (!validTransitions[current]?.includes(status)) {
       return badRequest(res, `Cannot transition from '${current}' to '${status}'`);
     }
-
     await query(`UPDATE Orders SET status = ?, updated_at = NOW() WHERE id = ?`, [status, req.params.id]);
     await query(
       `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
@@ -132,11 +152,12 @@ const updateOrderStatus = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// GET /admin/users
 const adminGetUsers = async (req, res, next) => {
   try {
     const { search, is_blocked } = req.query;
-    const page   = Math.max(1, parseInt(req.query.page)  || 1);
-    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
 
     let whereClause = 'WHERE 1=1';
@@ -149,19 +170,17 @@ const adminGetUsers = async (req, res, next) => {
       whereClause += ` AND is_blocked = ?`;
       params.push(is_blocked === 'true' ? 1 : 0);
     }
-
     const countRes = await query(`SELECT COUNT(*) as total FROM Users ${whereClause}`, params);
     const result = await query(
       `SELECT id, name, email, mobile, is_verified, is_active, is_blocked, created_at, last_login
-       FROM Users ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT ${limit} OFFSET ${offset}`,
+       FROM Users ${whereClause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
       params
     );
     return paginated(res, result, countRes[0].total, page, limit);
   } catch (err) { next(err); }
 };
 
+// PUT /admin/users/:id/block
 const blockUser = async (req, res, next) => {
   try {
     const { is_blocked } = req.body;
@@ -170,21 +189,21 @@ const blockUser = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// POST /admin/menu/products
 const createProduct = async (req, res, next) => {
   try {
     const { category_id, name, description, base_price, is_veg, is_featured, sizes } = req.body;
     const result = await query(
       `INSERT INTO Products (category_id, name, description, base_price, is_veg, is_featured)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [category_id, name, description || null, base_price, is_veg ? 1 : 0, is_featured ? 1 : 0]
+      [category_id, name, description || null, toNum(base_price).toFixed(2), is_veg ? 1 : 0, is_featured ? 1 : 0]
     );
     const productId = result.insertId;
-
     if (sizes && sizes.length) {
       for (const size of sizes) {
         await query(
           `INSERT INTO ProductSizes (product_id, size_name, size_code, price) VALUES (?, ?, ?, ?)`,
-          [productId, size.size_name, size.size_code, size.price]
+          [productId, size.size_name, size.size_code || size.size_name[0], toNum(size.price).toFixed(2)]
         );
       }
     }
@@ -192,6 +211,7 @@ const createProduct = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// PUT /admin/menu/products/:id
 const updateProduct = async (req, res, next) => {
   try {
     const { name, description, base_price, is_veg, is_featured, is_available } = req.body;
@@ -206,9 +226,8 @@ const updateProduct = async (req, res, next) => {
          updated_at = NOW()
        WHERE id = ?`,
       [
-        name || null,
-        description || null,
-        base_price || null,
+        name || null, description || null,
+        base_price != null ? toNum(base_price).toFixed(2) : null,
         is_veg !== undefined ? (is_veg ? 1 : 0) : null,
         is_featured !== undefined ? (is_featured ? 1 : 0) : null,
         is_available !== undefined ? (is_available ? 1 : 0) : null,
@@ -219,6 +238,7 @@ const updateProduct = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// DELETE /admin/menu/products/:id
 const deleteProduct = async (req, res, next) => {
   try {
     await query(`UPDATE Products SET is_available = 0 WHERE id = ?`, [req.params.id]);
@@ -226,19 +246,29 @@ const deleteProduct = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// POST /admin/coupons
 const createCoupon = async (req, res, next) => {
   try {
-    const { code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, valid_from, valid_until } = req.body;
+    const { code, description, discount_type, discount_value, min_order_value,
+            max_discount, usage_limit, valid_from, valid_until } = req.body;
     await query(
-      `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, valid_from, valid_until)
+      `INSERT INTO Coupons (code, description, discount_type, discount_value,
+         min_order_value, max_discount, usage_limit, valid_from, valid_until)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        code.toUpperCase(), description, discount_type, discount_value,
-        min_order_value || 0, max_discount || null, usage_limit || null,
-        new Date(valid_from), new Date(valid_until),
-      ]
+      [code.toUpperCase(), description, discount_type,
+       toNum(discount_value).toFixed(2), toNum(min_order_value).toFixed(2),
+       max_discount != null ? toNum(max_discount).toFixed(2) : null,
+       usage_limit || null, new Date(valid_from), new Date(valid_until)]
     );
     return created(res, {}, 'Coupon created');
+  } catch (err) { next(err); }
+};
+
+// GET /admin/locations — all locations (for admin to pick theirs)
+const getAdminLocations = async (req, res, next) => {
+  try {
+    const result = await query(`SELECT * FROM Locations WHERE is_active = 1 ORDER BY name`);
+    return success(res, result);
   } catch (err) { next(err); }
 };
 
@@ -247,5 +277,5 @@ module.exports = {
   adminGetOrders, updateOrderStatus,
   adminGetUsers, blockUser,
   createProduct, updateProduct, deleteProduct,
-  createCoupon,
+  createCoupon, getAdminLocations,
 };

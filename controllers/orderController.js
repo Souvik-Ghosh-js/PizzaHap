@@ -7,32 +7,34 @@ const generateOrderNumber = () => {
   return `GOBT-${ts}${rand}`;
 };
 
+// mysql2 returns DECIMAL columns as strings — always parse
+const toNum = (v) => parseFloat(v) || 0;
+
 const calculateOrder = async (req, res, next) => {
   try {
     const { items, coupon_code, delivery_type = 'delivery' } = req.body;
     let subtotal = 0;
 
     for (const item of items) {
-      const sizeResult = await query(`SELECT price FROM ProductSizes WHERE id = ? AND is_available = 1`, [item.size_id]);
+      const sizeResult = await query(
+        `SELECT price FROM ProductSizes WHERE id = ? AND is_available = 1`, [item.size_id]);
       if (!sizeResult.length) return badRequest(res, `Invalid size for item`);
-      let itemPrice = sizeResult[0].price;
+      let itemPrice = toNum(sizeResult[0].price);
 
       if (item.crust_id) {
         const crustResult = await query(`SELECT extra_price FROM CrustTypes WHERE id = ?`, [item.crust_id]);
-        if (crustResult.length) itemPrice += crustResult[0].extra_price;
+        if (crustResult.length) itemPrice += toNum(crustResult[0].extra_price);
       }
-
       if (item.toppings && item.toppings.length) {
         for (const toppingId of item.toppings) {
           const tr = await query(`SELECT price FROM Toppings WHERE id = ? AND is_available = 1`, [toppingId]);
-          if (tr.length) itemPrice += tr[0].price;
+          if (tr.length) itemPrice += toNum(tr[0].price);
         }
       }
-      subtotal += itemPrice * (item.quantity || 1);
+      subtotal += parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));
     }
 
     const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
-    const tax_rate = 0.05;
     let discount_amount = 0;
     let coupon = null;
 
@@ -45,10 +47,10 @@ const calculateOrder = async (req, res, next) => {
       );
       if (couponResult.length) {
         coupon = couponResult[0];
-        if (subtotal >= coupon.min_order_value) {
+        if (subtotal >= toNum(coupon.min_order_value)) {
           discount_amount = coupon.discount_type === 'percentage'
-            ? Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity)
-            : coupon.discount_value;
+            ? Math.min((subtotal * toNum(coupon.discount_value)) / 100, toNum(coupon.max_discount) || Infinity)
+            : toNum(coupon.discount_value);
         } else {
           return badRequest(res, `Min order ₹${coupon.min_order_value} required for this coupon`);
         }
@@ -58,7 +60,7 @@ const calculateOrder = async (req, res, next) => {
     }
 
     const taxable = subtotal - discount_amount + delivery_fee;
-    const tax_amount = parseFloat((taxable * tax_rate).toFixed(2));
+    const tax_amount = parseFloat((taxable * 0.05).toFixed(2));
     const total_amount = parseFloat((taxable + tax_amount).toFixed(2));
     return success(res, { subtotal, discount_amount, delivery_fee, tax_amount, total_amount, coupon });
   } catch (err) { next(err); }
@@ -88,19 +90,21 @@ const placeOrder = async (req, res, next) => {
       if (!productResult.length) return badRequest(res, `Product not available`);
       const product = productResult[0];
 
-      let itemPrice = product.size_price + (product.crust_extra || 0);
+      // KEY FIX: toNum() converts MySQL DECIMAL strings to JS numbers
+      let itemPrice = toNum(product.size_price) + toNum(product.crust_extra);
       const itemToppings = [];
 
       if (item.toppings && item.toppings.length) {
         for (const toppingId of item.toppings) {
           const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [toppingId]);
-          if (tr.length) { itemPrice += tr[0].price; itemToppings.push(tr[0]); }
+          if (tr.length) { itemPrice += toNum(tr[0].price); itemToppings.push(tr[0]); }
         }
       }
 
-      const total_price = parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));
+      const unit_price = parseFloat(itemPrice.toFixed(2));
+      const total_price = parseFloat((unit_price * (item.quantity || 1)).toFixed(2));
       subtotal += total_price;
-      orderItems.push({ ...item, product, unit_price: itemPrice, total_price, toppings: itemToppings });
+      orderItems.push({ ...item, product, unit_price, total_price, toppings: itemToppings });
     }
 
     const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
@@ -116,10 +120,10 @@ const placeOrder = async (req, res, next) => {
       );
       if (!couponResult.length) return badRequest(res, 'Invalid coupon');
       const coupon = couponResult[0];
-      if (subtotal < coupon.min_order_value) return badRequest(res, `Min order ₹${coupon.min_order_value} required`);
+      if (subtotal < toNum(coupon.min_order_value)) return badRequest(res, `Min order ₹${coupon.min_order_value} required`);
       discount_amount = coupon.discount_type === 'percentage'
-        ? Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity)
-        : coupon.discount_value;
+        ? Math.min((subtotal * toNum(coupon.discount_value)) / 100, toNum(coupon.max_discount) || Infinity)
+        : toNum(coupon.discount_value);
       couponId = coupon.id;
     }
 
@@ -135,40 +139,44 @@ const placeOrder = async (req, res, next) => {
           tax_amount, total_amount, coupon_id, special_instructions, payment_status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [order_number, userId, location_id, delivery_type, delivery_address || null,
-         delivery_latitude || null, delivery_longitude || null, subtotal, discount_amount,
-         delivery_fee, tax_amount, total_amount, couponId, special_instructions || null]
+         delivery_latitude || null, delivery_longitude || null,
+         subtotal.toFixed(2), discount_amount.toFixed(2),
+         delivery_fee.toFixed(2), tax_amount.toFixed(2), total_amount.toFixed(2),
+         couponId, special_instructions || null]
       );
       const newOrderId = orderResult.insertId;
 
       for (const item of orderItems) {
-        let unit_price = item.unit_price.toFixed(2);
         const [itemResult] = await conn.execute(
           `INSERT INTO OrderItems (order_id, product_id, product_name, size_id, size_name,
             crust_id, crust_name, quantity, unit_price, total_price, special_instructions)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [newOrderId, item.product_id, item.product.name, item.size_id, item.product.size_name,
            item.crust_id || null, item.product.crust_name || null, item.quantity || 1,
-           unit_price, item.total_price, item.special_instructions || null]
+           item.unit_price.toFixed(2), item.total_price.toFixed(2), item.special_instructions || null]
         );
         const orderItemId = itemResult.insertId;
         for (const topping of item.toppings) {
           await conn.execute(
             `INSERT INTO OrderItemToppings (order_item_id, topping_id, topping_name, price) VALUES (?, ?, ?, ?)`,
-            [orderItemId, topping.id, topping.name, topping.price]
+            [orderItemId, topping.id, topping.name, toNum(topping.price).toFixed(2)]
           );
         }
       }
 
       await conn.execute(
-        `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role) VALUES (?, 'pending', 'Order placed', ?, 'user')`,
+        `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
+         VALUES (?, 'pending', 'Order placed', ?, 'user')`,
         [newOrderId, userId]
       );
 
       if (couponId) {
         await conn.execute(`UPDATE Coupons SET used_count = used_count + 1 WHERE id = ?`, [couponId]);
-        await conn.execute(`INSERT INTO UserCouponUsage (user_id, coupon_id, order_id) VALUES (?, ?, ?)`, [userId, couponId, newOrderId]);
+        await conn.execute(
+          `INSERT INTO UserCouponUsage (user_id, coupon_id, order_id) VALUES (?, ?, ?)`,
+          [userId, couponId, newOrderId]
+        );
       }
-
       return newOrderId;
     });
 
@@ -179,17 +187,15 @@ const placeOrder = async (req, res, next) => {
 const getMyOrders = async (req, res, next) => {
   try {
     const { status } = req.query;
-    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const page   = Math.max(1, parseInt(req.query.page) || 1);
     const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
     const offset = (page - 1) * limit;
 
     let whereClause = `WHERE o.user_id = ?`;
     const params = [req.user.id];
-
     if (status) { whereClause += ` AND o.status = ?`; params.push(status); }
 
     const countRes = await query(`SELECT COUNT(*) as total FROM Orders o ${whereClause}`, params);
-
     const result = await query(
       `SELECT o.*, l.name as location_name FROM Orders o
        LEFT JOIN Locations l ON o.location_id = l.id
@@ -212,15 +218,15 @@ const getOrderById = async (req, res, next) => {
     const order = orderResult[0];
 
     const [items, history, payment] = await Promise.all([
-      query(`SELECT oi.*, p.image_url FROM OrderItems oi LEFT JOIN Products p ON oi.product_id = p.id WHERE oi.order_id = ?`, [order.id]),
+      query(`SELECT oi.*, p.image_url FROM OrderItems oi
+             LEFT JOIN Products p ON oi.product_id = p.id WHERE oi.order_id = ?`, [order.id]),
       query(`SELECT * FROM OrderStatusHistory WHERE order_id = ? ORDER BY created_at ASC`, [order.id]),
       query(`SELECT payment_method, status, amount FROM Payments WHERE order_id = ?`, [order.id]),
     ]);
-
     for (const item of items) {
-      item.toppings = await query(`SELECT * FROM OrderItemToppings WHERE order_item_id = ?`, [item.id]);
+      item.toppings = await query(
+        `SELECT * FROM OrderItemToppings WHERE order_item_id = ?`, [item.id]);
     }
-
     return success(res, { ...order, items, status_history: history, payment: payment[0] || null });
   } catch (err) { next(err); }
 };
@@ -228,21 +234,21 @@ const getOrderById = async (req, res, next) => {
 const cancelOrder = async (req, res, next) => {
   try {
     const { reason } = req.body;
-    const orderResult = await query(`SELECT * FROM Orders WHERE id = ? AND user_id = ?`, [req.params.id, req.user.id]);
+    const orderResult = await query(
+      `SELECT * FROM Orders WHERE id = ? AND user_id = ?`, [req.params.id, req.user.id]);
     if (!orderResult.length) return notFound(res, 'Order not found');
     const order = orderResult[0];
-
     if (!['pending', 'confirmed'].includes(order.status)) {
       return badRequest(res, 'Order cannot be cancelled at this stage');
     }
-
     await query(
       `UPDATE Orders SET status = 'cancelled', cancellation_reason = ?,
        cancellation_time = NOW(), cancelled_by = 'user', updated_at = NOW() WHERE id = ?`,
       [reason || 'Cancelled by user', order.id]
     );
     await query(
-      `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role) VALUES (?, 'cancelled', ?, ?, 'user')`,
+      `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
+       VALUES (?, 'cancelled', ?, ?, 'user')`,
       [order.id, reason || 'Cancelled by user', req.user.id]
     );
     return success(res, {}, 'Order cancelled successfully');
@@ -259,7 +265,6 @@ const reorder = async (req, res, next) => {
       [req.params.id]
     );
     if (!orderResult.length) return notFound(res, 'Order not found');
-
     const cartItems = orderResult.map(item => ({
       product_id: item.product_id, size_id: item.size_id, crust_id: item.crust_id,
       quantity: item.quantity, special_instructions: item.special_instructions,
