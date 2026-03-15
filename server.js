@@ -34,7 +34,7 @@ app.use(cors({
 // Rate limiter - global
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
-  max: 200,
+  max: 5000,
   message: { success: false, message: 'Too many requests. Please try again later.' },
 }));
 
