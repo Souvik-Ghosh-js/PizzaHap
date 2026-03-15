@@ -1,103 +1,141 @@
 require('dotenv').config();
 const { getPool } = require('./db');
 
-/**
- * Migration v2 — run AFTER the original migrate.js
- * Adds: Coins system, OrderFeedback, AdminNotifications,
- *       structured address fields, payment_method + coins columns on Orders,
- *       'coins' type in Notifications ENUM.
- */
+const columnExists = async (pool, table, column) => {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [table, column]
+  );
+  return rows[0].cnt > 0;
+};
+
+const tableExists = async (pool, table) => {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) as cnt FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+    [table]
+  );
+  return rows[0].cnt > 0;
+};
+
+const addColumnIfMissing = async (pool, table, column, definition) => {
+  if (await columnExists(pool, table, column)) {
+    console.log(`SKIP  ${table}.${column} already exists`);
+  } else {
+    await pool.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    console.log(`OK    ${table}.${column} added`);
+  }
+};
+
 const migrate = async () => {
   const pool = getPool();
   console.log('Running v2 migrations...');
 
-  // Run these one at a time so a partial failure is easier to diagnose
-  const steps = [
-    // Structured address fields on Users
-    `ALTER TABLE Users ADD COLUMN IF NOT EXISTS address_house   VARCHAR(200) NULL`,
-    `ALTER TABLE Users ADD COLUMN IF NOT EXISTS address_town    VARCHAR(150) NULL`,
-    `ALTER TABLE Users ADD COLUMN IF NOT EXISTS address_state   VARCHAR(100) NULL`,
-    `ALTER TABLE Users ADD COLUMN IF NOT EXISTS address_pincode VARCHAR(10)  NULL`,
+  // ── Users: structured address fields ───────────────────────────
+  await addColumnIfMissing(pool, 'Users', 'address_house',   'VARCHAR(200) NULL');
+  await addColumnIfMissing(pool, 'Users', 'address_town',    'VARCHAR(150) NULL');
+  await addColumnIfMissing(pool, 'Users', 'address_state',   'VARCHAR(100) NULL');
+  await addColumnIfMissing(pool, 'Users', 'address_pincode', 'VARCHAR(10)  NULL');
 
-    // payment_method + coins columns on Orders
-    `ALTER TABLE Orders ADD COLUMN IF NOT EXISTS payment_method ENUM('online','cash_on_delivery') DEFAULT 'online'`,
-    `ALTER TABLE Orders ADD COLUMN IF NOT EXISTS coins_redeemed INT DEFAULT 0`,
-    `ALTER TABLE Orders ADD COLUMN IF NOT EXISTS coins_earned   INT DEFAULT 0`,
+  // ── Orders: payment_method + coins columns ──────────────────────
+  await addColumnIfMissing(pool, 'Orders', 'payment_method',  "ENUM('online','cash_on_delivery') DEFAULT 'online'");
+  await addColumnIfMissing(pool, 'Orders', 'coins_redeemed',  'INT DEFAULT 0');
+  await addColumnIfMissing(pool, 'Orders', 'coins_earned',    'INT DEFAULT 0');
 
-    // Extend Notifications type ENUM
-    `ALTER TABLE Notifications MODIFY COLUMN type ENUM('order','promo','system','refund','coins') NOT NULL`,
-
-    // Extend Orders status ENUM (add 'refunded' if missing)
-    `ALTER TABLE Orders MODIFY COLUMN status ENUM('pending','confirmed','preparing','out_for_delivery','delivered','cancelled','refund_requested','refunded') DEFAULT 'pending'`,
-
-    // UserCoins wallet
-    `CREATE TABLE IF NOT EXISTS UserCoins (
-      id         INT AUTO_INCREMENT PRIMARY KEY,
-      user_id    INT NOT NULL UNIQUE,
-      balance    INT NOT NULL DEFAULT 0,
-      updated_at DATETIME DEFAULT NOW(),
-      FOREIGN KEY (user_id) REFERENCES Users(id) ON DELETE CASCADE
-    )`,
-
-    // Coin transaction ledger
-    `CREATE TABLE IF NOT EXISTS CoinTransactions (
-      id          INT AUTO_INCREMENT PRIMARY KEY,
-      user_id     INT NOT NULL,
-      order_id    INT,
-      type        ENUM('earned','redeemed','reverted') NOT NULL,
-      coins       INT NOT NULL,
-      description VARCHAR(300),
-      created_at  DATETIME DEFAULT NOW(),
-      FOREIGN KEY (user_id)  REFERENCES Users(id),
-      FOREIGN KEY (order_id) REFERENCES Orders(id)
-    )`,
-
-    // Order-level feedback
-    `CREATE TABLE IF NOT EXISTS OrderFeedback (
-      id              INT AUTO_INCREMENT PRIMARY KEY,
-      order_id        INT NOT NULL UNIQUE,
-      user_id         INT NOT NULL,
-      food_rating     INT NOT NULL,
-      delivery_rating INT,
-      overall_rating  INT NOT NULL,
-      comment         VARCHAR(1000),
-      created_at      DATETIME DEFAULT NOW(),
-      FOREIGN KEY (order_id) REFERENCES Orders(id),
-      FOREIGN KEY (user_id)  REFERENCES Users(id)
-    )`,
-
-    // Admin notifications (location-scoped)
-    `CREATE TABLE IF NOT EXISTS AdminNotifications (
-      id          INT AUTO_INCREMENT PRIMARY KEY,
-      admin_id    INT,
-      location_id INT,
-      title       VARCHAR(200) NOT NULL,
-      message     VARCHAR(1000) NOT NULL,
-      type        ENUM('order','payment','system','refund') NOT NULL,
-      is_read     TINYINT(1) DEFAULT 0,
-      data        JSON,
-      created_at  DATETIME DEFAULT NOW(),
-      FOREIGN KEY (admin_id)    REFERENCES Admins(id) ON DELETE CASCADE,
-      FOREIGN KEY (location_id) REFERENCES Locations(id)
-    )`,
-  ];
-
-  for (const sql of steps) {
-    try {
-      await pool.execute(sql);
-      console.log('OK:', sql.slice(0, 60).replace(/\s+/g, ' '));
-    } catch (e) {
-      // Duplicate column / already exists — safe to ignore
-      if (e.code === 'ER_DUP_FIELDNAME' || e.message.includes('Duplicate column')) {
-        console.warn('SKIP (already exists):', sql.slice(0, 60).replace(/\s+/g, ' '));
-      } else {
-        console.error('FAILED:', e.message, '\nSQL:', sql);
-        throw e;
-      }
-    }
+  // ── Notifications: extend type ENUM to include 'coins' ─────────
+  try {
+    await pool.execute(`ALTER TABLE Notifications MODIFY COLUMN type ENUM('order','promo','system','refund','coins') NOT NULL`);
+    console.log('OK    Notifications.type ENUM extended');
+  } catch (e) {
+    console.warn('SKIP  Notifications ENUM:', e.message);
   }
 
-  console.log('v2 migrations complete!');
+  // ── Orders: extend status ENUM to include 'refunded' ───────────
+  try {
+    await pool.execute(`ALTER TABLE Orders MODIFY COLUMN status ENUM('pending','confirmed','preparing','out_for_delivery','delivered','cancelled','refund_requested','refunded') DEFAULT 'pending'`);
+    console.log('OK    Orders.status ENUM extended');
+  } catch (e) {
+    console.warn('SKIP  Orders status ENUM:', e.message);
+  }
+
+  // ── New tables ──────────────────────────────────────────────────
+  if (!await tableExists(pool, 'UserCoins')) {
+    await pool.execute(`
+      CREATE TABLE UserCoins (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        user_id    INT NOT NULL UNIQUE,
+        balance    INT NOT NULL DEFAULT 0,
+        updated_at DATETIME DEFAULT NOW(),
+        FOREIGN KEY (user_id) REFERENCES Users(id) ON DELETE CASCADE
+      )
+    `);
+    console.log('OK    UserCoins table created');
+  } else {
+    console.log('SKIP  UserCoins already exists');
+  }
+
+  if (!await tableExists(pool, 'CoinTransactions')) {
+    await pool.execute(`
+      CREATE TABLE CoinTransactions (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        user_id     INT NOT NULL,
+        order_id    INT,
+        type        ENUM('earned','redeemed','reverted') NOT NULL,
+        coins       INT NOT NULL,
+        description VARCHAR(300),
+        created_at  DATETIME DEFAULT NOW(),
+        FOREIGN KEY (user_id)  REFERENCES Users(id),
+        FOREIGN KEY (order_id) REFERENCES Orders(id)
+      )
+    `);
+    console.log('OK    CoinTransactions table created');
+  } else {
+    console.log('SKIP  CoinTransactions already exists');
+  }
+
+  if (!await tableExists(pool, 'OrderFeedback')) {
+    await pool.execute(`
+      CREATE TABLE OrderFeedback (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        order_id        INT NOT NULL UNIQUE,
+        user_id         INT NOT NULL,
+        food_rating     INT NOT NULL,
+        delivery_rating INT,
+        overall_rating  INT NOT NULL,
+        comment         VARCHAR(1000),
+        created_at      DATETIME DEFAULT NOW(),
+        FOREIGN KEY (order_id) REFERENCES Orders(id),
+        FOREIGN KEY (user_id)  REFERENCES Users(id)
+      )
+    `);
+    console.log('OK    OrderFeedback table created');
+  } else {
+    console.log('SKIP  OrderFeedback already exists');
+  }
+
+  if (!await tableExists(pool, 'AdminNotifications')) {
+    await pool.execute(`
+      CREATE TABLE AdminNotifications (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        admin_id    INT,
+        location_id INT,
+        title       VARCHAR(200) NOT NULL,
+        message     VARCHAR(1000) NOT NULL,
+        type        ENUM('order','payment','system','refund') NOT NULL,
+        is_read     TINYINT(1) DEFAULT 0,
+        data        JSON,
+        created_at  DATETIME DEFAULT NOW(),
+        FOREIGN KEY (admin_id)    REFERENCES Admins(id) ON DELETE CASCADE,
+        FOREIGN KEY (location_id) REFERENCES Locations(id)
+      )
+    `);
+    console.log('OK    AdminNotifications table created');
+  } else {
+    console.log('SKIP  AdminNotifications already exists');
+  }
+
+  console.log('\nv2 migrations complete!');
   process.exit(0);
 };
 
