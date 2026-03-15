@@ -113,12 +113,33 @@ const getActiveCoupons = async (req, res, next) => {
 
 const generateInvoice = async (req, res, next) => {
   try {
-    const orderResult = await query(
-      `SELECT o.*, u.name, u.email, u.mobile, l.name as branch
-       FROM Orders o JOIN Users u ON o.user_id = u.id JOIN Locations l ON o.location_id = l.id
-       WHERE o.id = ? AND o.user_id = ?`,
-      [req.params.id, req.user.id]
-    );
+    // Works for both authenticated users (own orders) and admins (any order)
+    const isAdmin = !!req.admin;
+    const userId  = req.user?.id;
+
+    let orderResult;
+    if (isAdmin) {
+      const lid = req.admin.location_id;
+      let where = `WHERE o.id = ?`;
+      const params = [req.params.id];
+      if (lid) { where += ` AND o.location_id = ?`; params.push(lid); }
+      orderResult = await query(
+        `SELECT o.*, COALESCE(u.name,'Walk-in') as name, COALESCE(u.email,'') as email,
+                COALESCE(u.mobile,'') as mobile, l.name as branch
+         FROM Orders o
+         LEFT JOIN Users u ON o.user_id = u.id
+         JOIN Locations l ON o.location_id = l.id
+         ${where}`, params
+      );
+    } else {
+      orderResult = await query(
+        `SELECT o.*, u.name, u.email, u.mobile, l.name as branch
+         FROM Orders o JOIN Users u ON o.user_id = u.id JOIN Locations l ON o.location_id = l.id
+         WHERE o.id = ? AND o.user_id = ?`,
+        [req.params.id, userId]
+      );
+    }
+
     if (!orderResult.length) return notFound(res, 'Order not found');
     const order = orderResult[0];
 
@@ -137,8 +158,15 @@ const generateInvoice = async (req, res, next) => {
       order_number: order.order_number,
       customer: { name: order.name, email: order.email, mobile: order.mobile },
       branch: order.branch, items,
-      subtotal: order.subtotal, discount: order.discount_amount,
-      delivery_fee: order.delivery_fee, cgst, sgst, total: order.total_amount, date: order.created_at,
+      subtotal: order.subtotal,
+      discount: order.discount_amount,
+      coins_redeemed: order.coins_redeemed || 0,
+      delivery_fee: order.delivery_fee,
+      cgst, sgst,
+      total: order.total_amount,
+      payment_method: order.payment_method,
+      payment_status: order.payment_status,
+      date: order.created_at,
     });
   } catch (err) { next(err); }
 };

@@ -147,10 +147,13 @@ const getMe = async (req, res, next) => {
   try {
     const result = await query(
       `SELECT u.id, u.name, u.email, u.mobile, u.profile_picture, u.address,
+              u.address_house, u.address_town, u.address_state, u.address_pincode,
               u.latitude, u.longitude, u.preferred_location_id, u.created_at,
-              l.name as preferred_location_name
+              l.name as preferred_location_name,
+              COALESCE(uc.balance, 0) as coin_balance
        FROM Users u
        LEFT JOIN Locations l ON u.preferred_location_id = l.id
+       LEFT JOIN UserCoins uc ON uc.user_id = u.id
        WHERE u.id = ?`,
       [req.user.id]
     );
@@ -161,18 +164,24 @@ const getMe = async (req, res, next) => {
 // PUT /auth/profile  (protected)
 const updateProfile = async (req, res, next) => {
   try {
-    const { name, mobile, address, latitude, longitude, preferred_location_id } = req.body;
+    const { name, mobile, address, address_house, address_town, address_state, address_pincode, latitude, longitude, preferred_location_id } = req.body;
     await query(
       `UPDATE Users SET
         name = IFNULL(?, name),
         mobile = IFNULL(?, mobile),
         address = IFNULL(?, address),
+        address_house = IFNULL(?, address_house),
+        address_town  = IFNULL(?, address_town),
+        address_state = IFNULL(?, address_state),
+        address_pincode = IFNULL(?, address_pincode),
         latitude = IFNULL(?, latitude),
         longitude = IFNULL(?, longitude),
         preferred_location_id = IFNULL(?, preferred_location_id),
         updated_at = NOW()
        WHERE id = ?`,
-      [name || null, mobile || null, address || null, latitude || null, longitude || null, preferred_location_id || null, req.user.id]
+      [name || null, mobile || null, address || null,
+       address_house || null, address_town || null, address_state || null, address_pincode || null,
+       latitude || null, longitude || null, preferred_location_id || null, req.user.id]
     );
     return success(res, {}, 'Profile updated');
   } catch (err) { next(err); }
