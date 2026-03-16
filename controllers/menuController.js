@@ -3,9 +3,7 @@ const { success, notFound, paginated } = require('../utils/response');
 
 const getCategories = async (req, res, next) => {
   try {
-    const result = await query(
-      `SELECT * FROM Categories WHERE is_active = 1 ORDER BY sort_order`
-    );
+    const result = await query(`SELECT * FROM Categories WHERE is_active = 1 ORDER BY sort_order`);
     return success(res, result);
   } catch (err) { next(err); }
 };
@@ -27,21 +25,16 @@ const getProducts = async (req, res, next) => {
       params.push(`%${search}%`, `%${search}%`);
     }
 
-    /* Location filter: exclude products explicitly marked unavailable at this location.
-       Products with no row in ProductLocationAvailability are available everywhere. */
     let joinClause = '';
     if (location_id) {
       const lid = parseInt(location_id);
-      joinClause = `LEFT JOIN ProductLocationAvailability pla
-                    ON pla.product_id = p.id AND pla.location_id = ${lid}`;
+      joinClause = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${lid}`;
       where += ` AND (pla.is_available IS NULL OR pla.is_available = 1)`;
     }
 
-    const countRes = await query(
-      `SELECT COUNT(*) as total FROM Products p ${joinClause} ${where}`, params
-    );
+    const countRes = await query(`SELECT COUNT(*) as total FROM Products p ${joinClause} ${where}`, params);
     const rows = await query(
-      `SELECT p.*, c.name as category_name,
+      `SELECT p.*, c.name as category_name, c.has_toppings, c.has_crust,
               COALESCE(pla.is_available, 1) as location_available
        FROM Products p
        LEFT JOIN Categories c ON p.category_id = c.id
@@ -59,37 +52,34 @@ const getProductById = async (req, res, next) => {
   try {
     const { location_id } = req.query;
     const rows = await query(
-      `SELECT p.*, c.name as category_name FROM Products p
-       LEFT JOIN Categories c ON p.category_id = c.id
+      `SELECT p.*, c.name as category_name, c.has_toppings, c.has_crust
+       FROM Products p LEFT JOIN Categories c ON p.category_id = c.id
        WHERE p.id = ? AND p.is_available = 1`,
       [req.params.id]
     );
     if (!rows.length) return notFound(res, 'Product not found');
     const product = rows[0];
 
-    // Check location-specific availability
     if (location_id) {
       const avail = await query(
-        `SELECT is_available FROM ProductLocationAvailability
-         WHERE product_id = ? AND location_id = ?`,
+        `SELECT is_available FROM ProductLocationAvailability WHERE product_id = ? AND location_id = ?`,
         [product.id, parseInt(location_id)]
       );
-      if (avail.length && !avail[0].is_available) {
-        return notFound(res, 'Product not available at this location');
-      }
+      if (avail.length && !avail[0].is_available) return notFound(res, 'Product not available at this location');
     }
 
-    const [sizes, crusts, toppings, ratings] = await Promise.all([
-      query(`SELECT * FROM ProductSizes WHERE product_id = ? AND is_available = 1`, [product.id]),
-      query(`SELECT * FROM CrustTypes WHERE is_available = 1 ORDER BY sort_order`),
-      query(`SELECT * FROM Toppings WHERE is_available = 1 ORDER BY sort_order`),
-      query(
-        `SELECT r.*, u.name as user_name FROM Ratings r
-         LEFT JOIN Users u ON r.user_id = u.id
-         WHERE r.product_id = ? AND r.is_approved = 1 ORDER BY r.created_at DESC`,
-        [product.id]
-      ),
-    ]);
+    const sizesPromise   = query(`SELECT * FROM ProductSizes WHERE product_id = ? AND is_available = 1`, [product.id]);
+    const ratingsPromise = query(
+      `SELECT r.*, u.name as user_name FROM Ratings r LEFT JOIN Users u ON r.user_id = u.id
+       WHERE r.product_id = ? AND r.is_approved = 1 ORDER BY r.created_at DESC`,
+      [product.id]
+    );
+
+    // Only fetch crusts/toppings if the category has them enabled
+    const crustsPromise  = product.has_crust    ? query(`SELECT * FROM CrustTypes WHERE is_available = 1 ORDER BY sort_order`) : Promise.resolve([]);
+    const toppingsPromise= product.has_toppings ? query(`SELECT * FROM Toppings   WHERE is_available = 1 ORDER BY sort_order`) : Promise.resolve([]);
+
+    const [sizes, crusts, toppings, ratings] = await Promise.all([sizesPromise, crustsPromise, toppingsPromise, ratingsPromise]);
 
     const avgRating = ratings.length
       ? (ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)
@@ -106,18 +96,15 @@ const getProductById = async (req, res, next) => {
 const getFeaturedProducts = async (req, res, next) => {
   try {
     const { location_id } = req.query;
-    let joinClause = '';
-    let whereExtra = '';
+    let joinClause = '', whereExtra = '';
     if (location_id) {
       const lid = parseInt(location_id);
-      joinClause = `LEFT JOIN ProductLocationAvailability pla
-                    ON pla.product_id = p.id AND pla.location_id = ${lid}`;
+      joinClause = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${lid}`;
       whereExtra = ` AND (pla.is_available IS NULL OR pla.is_available = 1)`;
     }
     const rows = await query(
-      `SELECT p.*, c.name as category_name
-       FROM Products p
-       LEFT JOIN Categories c ON p.category_id = c.id
+      `SELECT p.*, c.name as category_name, c.has_toppings, c.has_crust
+       FROM Products p LEFT JOIN Categories c ON p.category_id = c.id
        ${joinClause}
        WHERE p.is_featured = 1 AND p.is_available = 1${whereExtra}
        ORDER BY p.sort_order LIMIT 10`

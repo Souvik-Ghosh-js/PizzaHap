@@ -8,29 +8,42 @@ const generateOrderNumber = () => {
   return `GOBT-${ts}${rand}`;
 };
 
+// ── Helper: build price for a single item ─────────────────────────
+const buildItemPrice = async (item) => {
+  const sizeResult = await query(
+    `SELECT price FROM ProductSizes WHERE id = ? AND is_available = 1`, [item.size_id]
+  );
+  if (!sizeResult.length) throw new Error(`Invalid or unavailable size`);
+  let itemPrice = parseFloat(sizeResult[0].price);
+
+  if (item.crust_id) {
+    const cr = await query(`SELECT extra_price FROM CrustTypes WHERE id = ? AND is_available = 1`, [item.crust_id]);
+    if (cr.length) itemPrice += parseFloat(cr[0].extra_price);
+  }
+  if (item.toppings?.length) {
+    for (const tid of item.toppings) {
+      const tr = await query(`SELECT price FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
+      if (tr.length) itemPrice += parseFloat(tr[0].price);
+    }
+  }
+  return itemPrice;
+};
+
+// ── Calculate order totals (preview) ─────────────────────────────
 const calculateOrder = async (req, res, next) => {
   try {
     const { items, coupon_code, delivery_type = 'delivery', coins_to_redeem = 0 } = req.body;
     let subtotal = 0;
+
     for (const item of items) {
-      const sizeResult = await query(`SELECT price FROM ProductSizes WHERE id = ? AND is_available = 1`, [item.size_id]);
-      if (!sizeResult.length) return badRequest(res, `Invalid size for item`);
-      let itemPrice = sizeResult[0].price;
-      if (item.crust_id) {
-        const cr = await query(`SELECT extra_price FROM CrustTypes WHERE id = ?`, [item.crust_id]);
-        if (cr.length) itemPrice += cr[0].extra_price;
-      }
-      if (item.toppings?.length) {
-        for (const tid of item.toppings) {
-          const tr = await query(`SELECT price FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-          if (tr.length) itemPrice += tr[0].price;
-        }
-      }
-      subtotal += itemPrice * (item.quantity || 1);
+      const price = await buildItemPrice(item);
+      subtotal += price * (item.quantity || 1);
     }
+    subtotal = parseFloat(subtotal.toFixed(2));
 
     const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
     let discount_amount = 0, coupon = null;
+
     if (coupon_code) {
       const couponResult = await query(
         `SELECT * FROM Coupons WHERE code = ? AND is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW() AND (usage_limit IS NULL OR used_count < usage_limit)`,
@@ -42,24 +55,34 @@ const calculateOrder = async (req, res, next) => {
       discount_amount = coupon.discount_type === 'percentage'
         ? Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity)
         : coupon.discount_value;
+      discount_amount = parseFloat(discount_amount.toFixed(2));
     }
 
     let coins_discount = 0, available_coins = 0;
-    if (req.user && coins_to_redeem > 0) {
+    if (req.user && parseInt(coins_to_redeem) > 0) {
       const walletRow = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [req.user.id]);
       available_coins = walletRow.length ? walletRow[0].balance : 0;
       const redeemable = Math.min(parseInt(coins_to_redeem) || 0, available_coins);
-      coins_discount = Math.max(0, Math.min(redeemable, subtotal - discount_amount + delivery_fee));
-      coins_discount = Math.floor(coins_discount);
+      coins_discount = Math.floor(Math.max(0, Math.min(redeemable, subtotal - discount_amount + delivery_fee)));
     }
 
-    const taxable = subtotal - discount_amount - coins_discount + delivery_fee;
-    const tax_amount = parseFloat((taxable * 0.05).toFixed(2));
-    const total_amount = parseFloat((taxable + tax_amount).toFixed(2));
-    return success(res, { subtotal, discount_amount, delivery_fee, coins_discount, tax_amount, total_amount, available_coins, coupon });
+    // NO TAX
+    const total_amount = parseFloat((subtotal - discount_amount - coins_discount + delivery_fee).toFixed(2));
+
+    return success(res, {
+      subtotal,
+      discount_amount,
+      delivery_fee,
+      coins_discount,
+      tax_amount: 0,
+      total_amount,
+      available_coins,
+      coupon,
+    });
   } catch (err) { next(err); }
 };
 
+// ── Place order ───────────────────────────────────────────────────
 const placeOrder = async (req, res, next) => {
   try {
     const {
@@ -70,24 +93,29 @@ const placeOrder = async (req, res, next) => {
       coins_to_redeem = 0,
     } = req.body;
     const userId = req.user.id;
+
     let subtotal = 0;
     const orderItems = [];
 
     for (const item of items) {
       const productResult = await query(
-        `SELECT p.*, ps.price as size_price, ps.size_name, ct.extra_price as crust_extra, ct.name as crust_name
-         FROM Products p JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
-         LEFT JOIN CrustTypes ct ON ct.id = ? WHERE p.id = ? AND p.is_available = 1`,
+        `SELECT p.*, ps.price as size_price, ps.size_name,
+                ct.extra_price as crust_extra, ct.name as crust_name
+         FROM Products p
+         JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
+         LEFT JOIN CrustTypes ct ON ct.id = ?
+         WHERE p.id = ? AND p.is_available = 1`,
         [item.size_id, item.crust_id || null, item.product_id]
       );
       if (!productResult.length) return badRequest(res, `Product not available`);
       const product = productResult[0];
-      let itemPrice = product.size_price + (product.crust_extra || 0);
+
+      let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
       const itemToppings = [];
       if (item.toppings?.length) {
         for (const tid of item.toppings) {
           const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-          if (tr.length) { itemPrice += tr[0].price; itemToppings.push(tr[0]); }
+          if (tr.length) { itemPrice += parseFloat(tr[0].price); itemToppings.push(tr[0]); }
         }
       }
       const total_price = parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));
@@ -95,8 +123,10 @@ const placeOrder = async (req, res, next) => {
       orderItems.push({ ...item, product, unit_price: itemPrice, total_price, toppings: itemToppings });
     }
 
+    subtotal = parseFloat(subtotal.toFixed(2));
     const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
     let discount_amount = 0, couponId = null;
+
     if (coupon_code) {
       const couponResult = await query(
         `SELECT * FROM Coupons WHERE code = ? AND is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW() AND (usage_limit IS NULL OR used_count < usage_limit)`,
@@ -108,6 +138,7 @@ const placeOrder = async (req, res, next) => {
       discount_amount = coupon.discount_type === 'percentage'
         ? Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity)
         : coupon.discount_value;
+      discount_amount = parseFloat(discount_amount.toFixed(2));
       couponId = coupon.id;
     }
 
@@ -116,27 +147,42 @@ const placeOrder = async (req, res, next) => {
       const walletRow = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [userId]);
       const available = walletRow.length ? walletRow[0].balance : 0;
       coinsToRedeem = Math.min(coinsToRedeem, available);
-      coins_discount = Math.max(0, Math.min(coinsToRedeem, subtotal - discount_amount + delivery_fee));
-      coins_discount = Math.floor(coins_discount);
+      coins_discount = Math.floor(Math.max(0, Math.min(coinsToRedeem, subtotal - discount_amount + delivery_fee)));
       coinsToRedeem = coins_discount;
     }
 
-    const taxable = subtotal - discount_amount - coins_discount + delivery_fee;
-    const tax_amount = parseFloat((taxable * 0.05).toFixed(2));
-    const total_amount = parseFloat((taxable + tax_amount).toFixed(2));
+    // NO TAX — total = subtotal - discount - coins_discount + delivery
+    const total_amount = parseFloat((subtotal - discount_amount - coins_discount + delivery_fee).toFixed(2));
     const order_number = generateOrderNumber();
 
     const orderId = await transaction(async (conn) => {
       const [orderResult] = await conn.execute(
-        `INSERT INTO Orders (order_number, user_id, location_id, delivery_type, delivery_address, delivery_latitude, delivery_longitude, subtotal, discount_amount, delivery_fee, tax_amount, total_amount, coupon_id, special_instructions, payment_status, payment_method, coins_redeemed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)`,
-        [order_number, userId, location_id, delivery_type, delivery_address || null, delivery_latitude || null, delivery_longitude || null, subtotal, discount_amount, delivery_fee, tax_amount, total_amount, couponId, special_instructions || null, payment_method, coinsToRedeem]
+        `INSERT INTO Orders
+          (order_number, user_id, location_id, delivery_type,
+           delivery_address, delivery_latitude, delivery_longitude,
+           subtotal, discount_amount, delivery_fee, tax_amount, total_amount,
+           coupon_id, special_instructions, payment_status, payment_method, coins_redeemed)
+         VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,'pending',?,?)`,
+        [
+          order_number, userId, location_id, delivery_type,
+          delivery_address || null, delivery_latitude || null, delivery_longitude || null,
+          subtotal, discount_amount, delivery_fee, total_amount,
+          couponId, special_instructions || null, payment_method, coinsToRedeem,
+        ]
       );
       const newOrderId = orderResult.insertId;
 
       for (const item of orderItems) {
         const [itemResult] = await conn.execute(
-          `INSERT INTO OrderItems (order_id, product_id, product_name, size_id, size_name, crust_id, crust_name, quantity, unit_price, total_price, special_instructions) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-          [newOrderId, item.product_id, item.product.name, item.size_id, item.product.size_name, item.crust_id || null, item.product.crust_name || null, item.quantity || 1, parseFloat(item.unit_price).toFixed(2), item.total_price, item.special_instructions || null]
+          `INSERT INTO OrderItems
+            (order_id, product_id, product_name, size_id, size_name,
+             crust_id, crust_name, quantity, unit_price, total_price, special_instructions)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          [newOrderId, item.product_id, item.product.name, item.size_id,
+           item.product.size_name, item.crust_id || null, item.product.crust_name || null,
+           item.quantity || 1,
+           parseFloat(item.unit_price).toFixed(2), item.total_price,
+           item.special_instructions || null]
         );
         for (const topping of item.toppings) {
           await conn.execute(
@@ -163,7 +209,7 @@ const placeOrder = async (req, res, next) => {
         );
         await conn.execute(
           `INSERT INTO CoinTransactions (user_id, order_id, type, coins, description) VALUES (?,?,'redeemed',?,?)`,
-          [userId, newOrderId, coinsToRedeem, `Redeemed for order #${newOrderId}`]
+          [userId, newOrderId, coinsToRedeem, `Redeemed for order #${order_number}`]
         );
       }
       return newOrderId;
@@ -179,14 +225,14 @@ const placeOrder = async (req, res, next) => {
 const getMyOrders = async (req, res, next) => {
   try {
     const { status } = req.query;
-    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const page  = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 10));
     const offset = (page - 1) * limit;
     let where = `WHERE o.user_id = ?`;
     const params = [req.user.id];
     if (status) { where += ` AND o.status = ?`; params.push(status); }
     const countRes = await query(`SELECT COUNT(*) as total FROM Orders o ${where}`, params);
-    const result = await query(
+    const result  = await query(
       `SELECT o.*, l.name as location_name FROM Orders o LEFT JOIN Locations l ON o.location_id = l.id ${where} ORDER BY o.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
       params
     );
@@ -197,7 +243,9 @@ const getMyOrders = async (req, res, next) => {
 const getOrderById = async (req, res, next) => {
   try {
     const orderResult = await query(
-      `SELECT o.*, l.name as location_name, l.address as location_address FROM Orders o LEFT JOIN Locations l ON o.location_id = l.id WHERE o.id = ? AND o.user_id = ?`,
+      `SELECT o.*, l.name as location_name, l.address as location_address
+       FROM Orders o LEFT JOIN Locations l ON o.location_id = l.id
+       WHERE o.id = ? AND o.user_id = ?`,
       [req.params.id, req.user.id]
     );
     if (!orderResult.length) return notFound(res, 'Order not found');
@@ -252,7 +300,11 @@ const cancelOrder = async (req, res, next) => {
 const reorder = async (req, res, next) => {
   try {
     const orderResult = await query(
-      `SELECT oi.product_id, oi.size_id, oi.crust_id, oi.quantity, oi.special_instructions, GROUP_CONCAT(CAST(oit.topping_id AS CHAR)) as topping_ids FROM OrderItems oi LEFT JOIN OrderItemToppings oit ON oit.order_item_id = oi.id WHERE oi.order_id = ? GROUP BY oi.id`,
+      `SELECT oi.product_id, oi.size_id, oi.crust_id, oi.quantity, oi.special_instructions,
+              GROUP_CONCAT(CAST(oit.topping_id AS CHAR)) as topping_ids
+       FROM OrderItems oi
+       LEFT JOIN OrderItemToppings oit ON oit.order_item_id = oi.id
+       WHERE oi.order_id = ? GROUP BY oi.id`,
       [req.params.id]
     );
     if (!orderResult.length) return notFound(res, 'Order not found');
@@ -269,7 +321,9 @@ const submitOrderFeedback = async (req, res, next) => {
   try {
     const { food_rating, delivery_rating, overall_rating, comment } = req.body;
     const orderId = req.params.id;
-    const orderCheck = await query(`SELECT id FROM Orders WHERE id = ? AND user_id = ? AND status = 'delivered'`, [orderId, req.user.id]);
+    const orderCheck = await query(
+      `SELECT id FROM Orders WHERE id = ? AND user_id = ? AND status = 'delivered'`, [orderId, req.user.id]
+    );
     if (!orderCheck.length) return badRequest(res, 'Can only give feedback on delivered orders');
     const existing = await query(`SELECT id FROM OrderFeedback WHERE order_id = ?`, [orderId]);
     if (existing.length) return badRequest(res, 'Feedback already submitted for this order');
@@ -285,11 +339,16 @@ const getMyCoinBalance = async (req, res, next) => {
   try {
     const wallet = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [req.user.id]);
     const transactions = await query(
-      `SELECT ct.*, o.order_number FROM CoinTransactions ct LEFT JOIN Orders o ON ct.order_id = o.id WHERE ct.user_id = ? ORDER BY ct.created_at DESC LIMIT 50`,
+      `SELECT ct.*, o.order_number FROM CoinTransactions ct
+       LEFT JOIN Orders o ON ct.order_id = o.id
+       WHERE ct.user_id = ? ORDER BY ct.created_at DESC LIMIT 50`,
       [req.user.id]
     );
     return success(res, { balance: wallet.length ? wallet[0].balance : 0, transactions });
   } catch (err) { next(err); }
 };
 
-module.exports = { calculateOrder, placeOrder, getMyOrders, getOrderById, cancelOrder, reorder, submitOrderFeedback, getMyCoinBalance };
+module.exports = {
+  calculateOrder, placeOrder, getMyOrders, getOrderById,
+  cancelOrder, reorder, submitOrderFeedback, getMyCoinBalance,
+};

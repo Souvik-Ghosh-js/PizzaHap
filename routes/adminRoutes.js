@@ -7,9 +7,12 @@ const {
   adminLogin, getDashboard, getReports,
   adminGetOrders, adminGetOrderDetail, updateOrderStatus, updatePaymentStatus, adminPlaceOrder,
   adminGetUsers, blockUser,
+  adminGetCategories, createCategory, updateCategory, uploadCategoryImage,
   adminGetProducts, createProduct, updateProduct, deleteProduct,
   uploadProductImage, setProductLocationAvailability, getProductAvailabilityMatrix,
+  adminGetProductSizes, createProductSize, updateProductSize, deleteProductSize,
   adminGetToppings, createTopping, updateTopping, deleteTopping,
+  adminGetCrusts, createCrust, updateCrust, deleteCrust,
   adminGetLocations, createLocation, updateLocation,
   adminGetCoupons, createCoupon, updateCoupon,
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
@@ -21,23 +24,24 @@ const { authenticateAdmin, requireRole } = require('../middlewares/auth');
 const { validate } = require('../middlewares/errorHandler');
 const { generateInvoice } = require('../controllers/miscController');
 
-// ── Image upload ──────────────────────────────────────────────────
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/products/'),
+// ── Image upload helpers ──────────────────────────────────────────
+const makeStorage = (dir) => multer.diskStorage({
+  destination: (req, file, cb) => {
+    const p = `uploads/${dir}/`;
+    require('fs').mkdirSync(p, { recursive: true });
+    cb(null, p);
+  },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `product_${req.params.id}_${Date.now()}${ext}`);
+    cb(null, `${dir.slice(0,-1)}_${req.params.id}_${Date.now()}${ext}`);
   },
 });
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const ok = /jpeg|jpg|png|webp/.test(path.extname(file.originalname).toLowerCase()) &&
-               /jpeg|jpg|png|webp|image/.test(file.mimetype);
-    ok ? cb(null, true) : cb(new Error('Only JPEG, PNG, WebP images allowed'));
-  },
-});
+const imgFilter = (req, file, cb) => {
+  const ok = /jpeg|jpg|png|webp/.test(path.extname(file.originalname).toLowerCase());
+  ok ? cb(null, true) : cb(new Error('Only JPEG, PNG, WebP images allowed'));
+};
+const uploadProduct  = multer({ storage: makeStorage('products'),   limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imgFilter });
+const uploadCategory = multer({ storage: makeStorage('categories'), limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: imgFilter });
 
 // ── Public ────────────────────────────────────────────────────────
 router.post('/auth/login', [
@@ -55,21 +59,28 @@ router.get('/dashboard/reports', getReports);
 // ── Orders ────────────────────────────────────────────────────────
 router.get('/orders', adminGetOrders);
 router.get('/orders/:id', adminGetOrderDetail);
-router.put('/orders/:id/status', [body('status').notEmpty()], validate, updateOrderStatus);
+router.put('/orders/:id/status',         [body('status').notEmpty()],         validate, updateOrderStatus);
 router.put('/orders/:id/payment-status', [body('payment_status').notEmpty()], validate, updatePaymentStatus);
 router.get('/orders/:id/invoice', generateInvoice);
 
 // In-house billing
 router.post('/orders/inhouse', requireRole('super_admin', 'admin'), [
   body('items').isArray({ min: 1 }),
-  body('payment_method').isIn(['cash_on_delivery', 'online']),
 ], validate, adminPlaceOrder);
 
 // ── Users ─────────────────────────────────────────────────────────
 router.get('/users', adminGetUsers);
 router.put('/users/:id/block', requireRole('super_admin', 'admin'), blockUser);
 
-// ── Menu products ─────────────────────────────────────────────────
+// ── Categories ────────────────────────────────────────────────────
+router.get('/menu/categories', adminGetCategories);
+router.post('/menu/categories', requireRole('super_admin', 'admin'), [
+  body('name').trim().notEmpty(),
+], validate, createCategory);
+router.put('/menu/categories/:id', requireRole('super_admin', 'admin'), updateCategory);
+router.post('/menu/categories/:id/image', requireRole('super_admin', 'admin'), uploadCategory.single('image'), uploadCategoryImage);
+
+// ── Products ──────────────────────────────────────────────────────
 router.get('/menu/products', adminGetProducts);
 router.post('/menu/products', requireRole('super_admin', 'admin'), [
   body('name').trim().notEmpty(),
@@ -78,9 +89,18 @@ router.post('/menu/products', requireRole('super_admin', 'admin'), [
 ], validate, createProduct);
 router.put('/menu/products/:id', requireRole('super_admin', 'admin'), updateProduct);
 router.delete('/menu/products/:id', requireRole('super_admin', 'admin'), deleteProduct);
-router.post('/menu/products/:id/image', requireRole('super_admin', 'admin'), upload.single('image'), uploadProductImage);
+router.post('/menu/products/:id/image', requireRole('super_admin', 'admin'), uploadProduct.single('image'), uploadProductImage);
 router.put('/menu/products/:id/location-availability', requireRole('super_admin', 'admin', 'staff'), setProductLocationAvailability);
 router.get('/menu/products/:id/availability-matrix', getProductAvailabilityMatrix);
+
+// Product sizes
+router.get('/menu/products/:id/sizes', adminGetProductSizes);
+router.post('/menu/products/:id/sizes', requireRole('super_admin', 'admin'), [
+  body('size_name').trim().notEmpty(),
+  body('price').isNumeric(),
+], validate, createProductSize);
+router.put('/menu/products/:id/sizes/:sizeId', requireRole('super_admin', 'admin'), updateProductSize);
+router.delete('/menu/products/:id/sizes/:sizeId', requireRole('super_admin', 'admin'), deleteProductSize);
 
 // ── Toppings ──────────────────────────────────────────────────────
 router.get('/menu/toppings', adminGetToppings);
@@ -91,12 +111,19 @@ router.post('/menu/toppings', requireRole('super_admin', 'admin'), [
 router.put('/menu/toppings/:id', requireRole('super_admin', 'admin'), updateTopping);
 router.delete('/menu/toppings/:id', requireRole('super_admin', 'admin'), deleteTopping);
 
+// ── Crust Types ───────────────────────────────────────────────────
+router.get('/menu/crusts', adminGetCrusts);
+router.post('/menu/crusts', requireRole('super_admin', 'admin'), [
+  body('name').trim().notEmpty(),
+], validate, createCrust);
+router.put('/menu/crusts/:id', requireRole('super_admin', 'admin'), updateCrust);
+router.delete('/menu/crusts/:id', requireRole('super_admin', 'admin'), deleteCrust);
+
 // ── Locations ─────────────────────────────────────────────────────
 router.get('/locations', adminGetLocations);
 router.post('/locations', requireRole('super_admin'), [
   body('name').trim().notEmpty(),
   body('address').trim().notEmpty(),
-  body('city').trim().notEmpty(),
   body('latitude').isNumeric(),
   body('longitude').isNumeric(),
 ], validate, createLocation);

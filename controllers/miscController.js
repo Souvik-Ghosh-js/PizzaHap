@@ -9,13 +9,11 @@ const submitRating = async (req, res, next) => {
       [order_id, req.user.id]
     );
     if (!orderCheck.length) return badRequest(res, 'Can only rate delivered orders');
-
     const existing = await query(
       `SELECT id FROM Ratings WHERE order_id = ? AND user_id = ? AND product_id = ?`,
       [order_id, req.user.id, product_id]
     );
     if (existing.length) return conflict(res, 'Already rated this item');
-
     await query(
       `INSERT INTO Ratings (user_id, order_id, product_id, rating, review) VALUES (?, ?, ?, ?, ?)`,
       [req.user.id, order_id, product_id, rating, review || null]
@@ -73,23 +71,21 @@ const validateCoupon = async (req, res, next) => {
     );
     if (!result.length) return badRequest(res, 'Invalid or expired coupon');
     const coupon = result[0];
-
     if (parseFloat(order_value) < coupon.min_order_value) {
       return badRequest(res, `Minimum order of ₹${coupon.min_order_value} required`);
     }
-
-    const usageCheck = await query(
-      `SELECT COUNT(*) as count FROM UserCouponUsage WHERE coupon_id = ? AND user_id = ?`,
-      [coupon.id, req.user.id]
-    );
-    if (usageCheck[0].count >= coupon.per_user_limit) {
-      return badRequest(res, 'You have already used this coupon');
+    if (req.user) {
+      const usageCheck = await query(
+        `SELECT COUNT(*) as count FROM UserCouponUsage WHERE coupon_id = ? AND user_id = ?`,
+        [coupon.id, req.user.id]
+      );
+      if (usageCheck[0].count >= coupon.per_user_limit) {
+        return badRequest(res, 'You have already used this coupon');
+      }
     }
-
     let discount = coupon.discount_type === 'percentage'
       ? Math.min((order_value * coupon.discount_value) / 100, coupon.max_discount || Infinity)
       : coupon.discount_value;
-
     return success(res, {
       coupon_id: coupon.id, code: coupon.code,
       discount_type: coupon.discount_type, discount_value: coupon.discount_value,
@@ -100,20 +96,19 @@ const validateCoupon = async (req, res, next) => {
 
 const getActiveCoupons = async (req, res, next) => {
   try {
-    const result = await query(`
-      SELECT code, description, discount_type, discount_value, min_order_value, valid_until
-      FROM Coupons
-      WHERE is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW()
-        AND (usage_limit IS NULL OR used_count < usage_limit)
-      ORDER BY created_at DESC
-    `);
+    const result = await query(
+      `SELECT code, description, discount_type, discount_value, min_order_value, valid_until
+       FROM Coupons
+       WHERE is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW()
+         AND (usage_limit IS NULL OR used_count < usage_limit)
+       ORDER BY created_at DESC`
+    );
     return success(res, result);
   } catch (err) { next(err); }
 };
 
 const generateInvoice = async (req, res, next) => {
   try {
-    // Works for both authenticated users (own orders) and admins (any order)
     const isAdmin = !!req.admin;
     const userId  = req.user?.id;
 
@@ -127,14 +122,16 @@ const generateInvoice = async (req, res, next) => {
         `SELECT o.*, COALESCE(u.name,'Walk-in') as name, COALESCE(u.email,'') as email,
                 COALESCE(u.mobile,'') as mobile, l.name as branch
          FROM Orders o
-         LEFT JOIN Users u ON o.user_id = u.id
-         JOIN Locations l ON o.location_id = l.id
+         LEFT JOIN Users u     ON o.user_id     = u.id
+         JOIN  Locations l     ON o.location_id = l.id
          ${where}`, params
       );
     } else {
       orderResult = await query(
         `SELECT o.*, u.name, u.email, u.mobile, l.name as branch
-         FROM Orders o JOIN Users u ON o.user_id = u.id JOIN Locations l ON o.location_id = l.id
+         FROM Orders o
+         JOIN Users u     ON o.user_id     = u.id
+         JOIN Locations l ON o.location_id = l.id
          WHERE o.id = ? AND o.user_id = ?`,
         [req.params.id, userId]
       );
@@ -145,28 +142,28 @@ const generateInvoice = async (req, res, next) => {
 
     const items = await query(
       `SELECT oi.*, GROUP_CONCAT(oit.topping_name SEPARATOR ', ') as toppings_list
-       FROM OrderItems oi LEFT JOIN OrderItemToppings oit ON oit.order_item_id = oi.id
+       FROM OrderItems oi
+       LEFT JOIN OrderItemToppings oit ON oit.order_item_id = oi.id
        WHERE oi.order_id = ? GROUP BY oi.id`,
       [order.id]
     );
 
-    const cgst = parseFloat((order.tax_amount / 2).toFixed(2));
-    const sgst = parseFloat((order.tax_amount / 2).toFixed(2));
-
+    // No tax system — tax_amount will always be 0
     return success(res, {
-      invoice_number: `INV-${order.order_number}`,
-      order_number: order.order_number,
-      customer: { name: order.name, email: order.email, mobile: order.mobile },
-      branch: order.branch, items,
-      subtotal: order.subtotal,
-      discount: order.discount_amount,
-      coins_redeemed: order.coins_redeemed || 0,
-      delivery_fee: order.delivery_fee,
-      cgst, sgst,
-      total: order.total_amount,
-      payment_method: order.payment_method,
-      payment_status: order.payment_status,
-      date: order.created_at,
+      invoice_number:  `INV-${order.order_number}`,
+      order_number:    order.order_number,
+      customer:        { name: order.name, email: order.email, mobile: order.mobile },
+      branch:          order.branch,
+      items,
+      subtotal:        order.subtotal,
+      discount:        order.discount_amount,
+      coins_redeemed:  order.coins_redeemed || 0,
+      delivery_fee:    order.delivery_fee,
+      tax_amount:      0,
+      total:           order.total_amount,
+      payment_method:  order.payment_method,
+      payment_status:  order.payment_status,
+      date:            order.created_at,
     });
   } catch (err) { next(err); }
 };

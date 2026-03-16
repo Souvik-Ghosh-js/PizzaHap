@@ -2,1086 +2,3878 @@
   "openapi": "3.0.0",
   "info": {
     "title": "PizzaHap API",
-    "version": "3.0.0",
-    "description": "Location-aware pizza ordering platform. v3 adds: Coins system, Order Feedback, Admin In-house Billing, Payment Status management, Toppings CRUD, Locations CRUD, Admin Notifications, and structured address fields."
+    "version": "4.0.0",
+    "description": "PizzaHap pizza ordering platform API. v4: no tax system (total = subtotal - discount + delivery_fee), categories carry has_toppings/has_crust flags, full PayU payment + refund flow, admin manages categories/crusts/product-sizes, in-house orders auto-confirm and auto-mark COD paid."
   },
-  "servers": [{ "url": "http://13.232.73.121/api", "description": "Production" }],
+  "servers": [
+    {
+      "url": "http://13.232.73.121/api",
+      "description": "Production"
+    }
+  ],
   "components": {
     "securitySchemes": {
-      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
     },
     "schemas": {
       "OrderItem": {
         "type": "object",
-        "required": ["product_id", "size_id", "quantity"],
+        "required": [
+          "product_id",
+          "size_id",
+          "quantity"
+        ],
         "properties": {
-          "product_id":           { "type": "integer", "example": 1 },
-          "size_id":              { "type": "integer", "example": 2 },
-          "crust_id":             { "type": "integer", "example": 1, "nullable": true },
-          "quantity":             { "type": "integer", "example": 2 },
-          "toppings":             { "type": "array", "items": { "type": "integer" }, "example": [3, 5] },
-          "special_instructions": { "type": "string", "example": "No onions", "nullable": true }
+          "product_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "size_id": {
+            "type": "integer",
+            "example": 2
+          },
+          "crust_id": {
+            "type": "integer",
+            "example": 1,
+            "nullable": true
+          },
+          "quantity": {
+            "type": "integer",
+            "example": 2
+          },
+          "toppings": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "example": [
+              3,
+              5
+            ]
+          },
+          "special_instructions": {
+            "type": "string",
+            "example": "No onions",
+            "nullable": true
+          }
         }
       },
       "PlaceOrderBody": {
         "type": "object",
-        "required": ["items", "location_id"],
+        "required": [
+          "items",
+          "location_id"
+        ],
         "properties": {
-          "items":                { "type": "array", "items": { "$ref": "#/components/schemas/OrderItem" } },
-          "location_id":          { "type": "integer", "example": 1 },
-          "delivery_type":        { "type": "string", "enum": ["delivery", "pickup"], "default": "delivery" },
-          "delivery_address":     { "type": "string", "example": "Flat 4B, Sunrise Apartments, Indiranagar", "nullable": true },
-          "delivery_latitude":    { "type": "number", "example": 12.9716, "nullable": true },
-          "delivery_longitude":   { "type": "number", "example": 77.5946, "nullable": true },
-          "coupon_code":          { "type": "string", "example": "SAVE20", "nullable": true },
-          "special_instructions": { "type": "string", "nullable": true },
-          "payment_method":       { "type": "string", "enum": ["online", "cash_on_delivery"], "default": "online" },
-          "coins_to_redeem":      { "type": "integer", "example": 50, "default": 0, "description": "Number of coins to redeem. 1 coin = Rs.1 discount." }
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItem"
+            }
+          },
+          "location_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "delivery_type": {
+            "type": "string",
+            "enum": [
+              "delivery",
+              "pickup"
+            ],
+            "default": "delivery"
+          },
+          "delivery_address": {
+            "type": "string",
+            "example": "Flat 4B, Sunrise Apartments, Indiranagar",
+            "nullable": true
+          },
+          "delivery_latitude": {
+            "type": "number",
+            "example": 12.9716,
+            "nullable": true
+          },
+          "delivery_longitude": {
+            "type": "number",
+            "example": 77.5946,
+            "nullable": true
+          },
+          "coupon_code": {
+            "type": "string",
+            "example": "SAVE20",
+            "nullable": true
+          },
+          "special_instructions": {
+            "type": "string",
+            "nullable": true
+          },
+          "payment_method": {
+            "type": "string",
+            "enum": [
+              "online",
+              "cash_on_delivery"
+            ],
+            "default": "online"
+          },
+          "coins_to_redeem": {
+            "type": "integer",
+            "example": 50,
+            "default": 0,
+            "description": "Number of coins to redeem. 1 coin = Rs.1 discount."
+          }
         }
       },
       "CalculateOrderBody": {
         "type": "object",
-        "required": ["items"],
+        "required": [
+          "items"
+        ],
         "properties": {
-          "items":           { "type": "array", "items": { "$ref": "#/components/schemas/OrderItem" } },
-          "coupon_code":     { "type": "string", "nullable": true },
-          "delivery_type":   { "type": "string", "enum": ["delivery", "pickup"], "default": "delivery" },
-          "coins_to_redeem": { "type": "integer", "example": 50, "default": 0 }
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItem"
+            }
+          },
+          "coupon_code": {
+            "type": "string",
+            "nullable": true
+          },
+          "delivery_type": {
+            "type": "string",
+            "enum": [
+              "delivery",
+              "pickup"
+            ],
+            "default": "delivery"
+          },
+          "coins_to_redeem": {
+            "type": "integer",
+            "example": 50,
+            "default": 0
+          }
         }
       },
       "CalculateOrderResponse": {
         "type": "object",
         "properties": {
-          "subtotal":        { "type": "number", "example": 500 },
-          "discount_amount": { "type": "number", "example": 50 },
-          "coins_discount":  { "type": "number", "example": 30, "description": "Rupee value of coins redeemed" },
-          "delivery_fee":    { "type": "number", "example": 0 },
-          "tax_amount":      { "type": "number", "example": 21.0 },
-          "total_amount":    { "type": "number", "example": 441.0 },
-          "available_coins": { "type": "integer", "example": 120 }
+          "subtotal": {
+            "type": "number",
+            "example": 500
+          },
+          "discount_amount": {
+            "type": "number",
+            "example": 50
+          },
+          "coins_discount": {
+            "type": "number",
+            "example": 30,
+            "description": "Rupee value of coins redeemed"
+          },
+          "delivery_fee": {
+            "type": "number",
+            "example": 0
+          },
+          "tax_amount": {
+            "type": "number",
+            "example": 21.0
+          },
+          "total_amount": {
+            "type": "number",
+            "example": 441.0
+          },
+          "available_coins": {
+            "type": "integer",
+            "example": 120
+          }
         }
       },
       "AdminPlaceOrderBody": {
         "type": "object",
-        "required": ["items", "payment_method"],
+        "required": [
+          "items",
+          "payment_method"
+        ],
         "properties": {
-          "user_id":              { "type": "integer", "nullable": true, "description": "Omit for walk-in customer" },
-          "items":                { "type": "array", "items": { "$ref": "#/components/schemas/OrderItem" } },
-          "location_id":          { "type": "integer", "description": "Auto-set from admin token if location-scoped" },
-          "delivery_type":        { "type": "string", "enum": ["delivery", "pickup"], "default": "pickup" },
-          "delivery_address":     { "type": "string", "nullable": true },
-          "payment_method":       { "type": "string", "enum": ["cash_on_delivery", "online"] },
-          "special_instructions": { "type": "string", "nullable": true }
+          "user_id": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Omit for walk-in customer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderItem"
+            }
+          },
+          "location_id": {
+            "type": "integer",
+            "description": "Auto-set from admin token if location-scoped"
+          },
+          "delivery_type": {
+            "type": "string",
+            "enum": [
+              "delivery",
+              "pickup"
+            ],
+            "default": "pickup"
+          },
+          "delivery_address": {
+            "type": "string",
+            "nullable": true
+          },
+          "payment_method": {
+            "type": "string",
+            "enum": [
+              "cash_on_delivery",
+              "online"
+            ]
+          },
+          "special_instructions": {
+            "type": "string",
+            "nullable": true
+          }
         }
       },
       "Topping": {
         "type": "object",
         "properties": {
-          "id":           { "type": "integer" },
-          "name":         { "type": "string", "example": "Extra Cheese" },
-          "price":        { "type": "number", "example": 30 },
-          "is_veg":       { "type": "boolean" },
-          "is_available": { "type": "boolean" },
-          "sort_order":   { "type": "integer" }
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "example": "Extra Cheese"
+          },
+          "price": {
+            "type": "number",
+            "example": 30
+          },
+          "is_veg": {
+            "type": "boolean"
+          },
+          "is_available": {
+            "type": "boolean"
+          },
+          "sort_order": {
+            "type": "integer"
+          }
         }
       },
       "Location": {
         "type": "object",
         "properties": {
-          "id":           { "type": "integer" },
-          "name":         { "type": "string", "example": "Koramangala Branch" },
-          "address":      { "type": "string" },
-          "city":         { "type": "string" },
-          "latitude":     { "type": "number" },
-          "longitude":    { "type": "number" },
-          "phone":        { "type": "string", "nullable": true },
-          "email":        { "type": "string", "nullable": true },
-          "is_active":    { "type": "boolean" },
-          "opening_time": { "type": "string", "example": "10:00:00" },
-          "closing_time": { "type": "string", "example": "23:00:00" }
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "example": "Koramangala Branch"
+          },
+          "address": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "latitude": {
+            "type": "number"
+          },
+          "longitude": {
+            "type": "number"
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "opening_time": {
+            "type": "string",
+            "example": "10:00:00"
+          },
+          "closing_time": {
+            "type": "string",
+            "example": "23:00:00"
+          }
         }
       },
       "Coupon": {
         "type": "object",
         "properties": {
-          "id":             { "type": "integer" },
-          "code":           { "type": "string", "example": "SAVE20" },
-          "description":    { "type": "string" },
-          "discount_type":  { "type": "string", "enum": ["percentage", "flat"] },
-          "discount_value": { "type": "number" },
-          "min_order_value":{ "type": "number" },
-          "max_discount":   { "type": "number", "nullable": true },
-          "usage_limit":    { "type": "integer", "nullable": true },
-          "used_count":     { "type": "integer" },
-          "per_user_limit": { "type": "integer" },
-          "valid_from":     { "type": "string", "format": "date-time" },
-          "valid_until":    { "type": "string", "format": "date-time" },
-          "is_active":      { "type": "boolean" }
+          "id": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string",
+            "example": "SAVE20"
+          },
+          "description": {
+            "type": "string"
+          },
+          "discount_type": {
+            "type": "string",
+            "enum": [
+              "percentage",
+              "flat"
+            ]
+          },
+          "discount_value": {
+            "type": "number"
+          },
+          "min_order_value": {
+            "type": "number"
+          },
+          "max_discount": {
+            "type": "number",
+            "nullable": true
+          },
+          "usage_limit": {
+            "type": "integer",
+            "nullable": true
+          },
+          "used_count": {
+            "type": "integer"
+          },
+          "per_user_limit": {
+            "type": "integer"
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "is_active": {
+            "type": "boolean"
+          }
         }
       },
       "CoinTransaction": {
         "type": "object",
         "properties": {
-          "id":           { "type": "integer" },
-          "type":         { "type": "string", "enum": ["earned", "redeemed", "reverted"] },
-          "coins":        { "type": "integer" },
-          "description":  { "type": "string" },
-          "order_number": { "type": "string", "nullable": true },
-          "created_at":   { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "earned",
+              "redeemed",
+              "reverted"
+            ]
+          },
+          "coins": {
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "order_number": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "OrderFeedbackBody": {
         "type": "object",
-        "required": ["food_rating", "overall_rating"],
+        "required": [
+          "food_rating",
+          "overall_rating"
+        ],
         "properties": {
-          "food_rating":     { "type": "integer", "minimum": 1, "maximum": 5, "example": 5 },
-          "delivery_rating": { "type": "integer", "minimum": 1, "maximum": 5, "example": 4, "nullable": true },
-          "overall_rating":  { "type": "integer", "minimum": 1, "maximum": 5, "example": 5 },
-          "comment":         { "type": "string", "example": "Pizza was amazing!", "nullable": true }
+          "food_rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "example": 5
+          },
+          "delivery_rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "example": 4,
+            "nullable": true
+          },
+          "overall_rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "example": 5
+          },
+          "comment": {
+            "type": "string",
+            "example": "Pizza was amazing!",
+            "nullable": true
+          }
         }
       },
       "UserProfile": {
         "type": "object",
         "properties": {
-          "id":                    { "type": "integer" },
-          "name":                  { "type": "string" },
-          "email":                 { "type": "string" },
-          "mobile":                { "type": "string" },
-          "address":               { "type": "string", "nullable": true, "description": "Legacy single-string address" },
-          "address_house":         { "type": "string", "nullable": true, "example": "Flat 4B, Sunrise Apartments" },
-          "address_town":          { "type": "string", "nullable": true, "example": "Indiranagar" },
-          "address_state":         { "type": "string", "nullable": true, "example": "Karnataka" },
-          "address_pincode":       { "type": "string", "nullable": true, "example": "560038" },
-          "coin_balance":          { "type": "integer", "example": 120 },
-          "preferred_location_id": { "type": "integer", "nullable": true }
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "mobile": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string",
+            "nullable": true,
+            "description": "Legacy single-string address"
+          },
+          "address_house": {
+            "type": "string",
+            "nullable": true,
+            "example": "Flat 4B, Sunrise Apartments"
+          },
+          "address_town": {
+            "type": "string",
+            "nullable": true,
+            "example": "Indiranagar"
+          },
+          "address_state": {
+            "type": "string",
+            "nullable": true,
+            "example": "Karnataka"
+          },
+          "address_pincode": {
+            "type": "string",
+            "nullable": true,
+            "example": "560038"
+          },
+          "coin_balance": {
+            "type": "integer",
+            "example": 120
+          },
+          "preferred_location_id": {
+            "type": "integer",
+            "nullable": true
+          }
         }
       },
       "AdminNotification": {
         "type": "object",
         "properties": {
-          "id":          { "type": "integer" },
-          "title":       { "type": "string" },
-          "message":     { "type": "string" },
-          "type":        { "type": "string", "enum": ["order", "payment", "system", "refund"] },
-          "is_read":     { "type": "boolean" },
-          "location_id": { "type": "integer", "nullable": true },
-          "data":        { "type": "object", "nullable": true },
-          "created_at":  { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "order",
+              "payment",
+              "system",
+              "refund"
+            ]
+          },
+          "is_read": {
+            "type": "boolean"
+          },
+          "location_id": {
+            "type": "integer",
+            "nullable": true
+          },
+          "data": {
+            "type": "object",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "Pagination": {
         "type": "object",
         "properties": {
-          "total":        { "type": "integer" },
-          "page":         { "type": "integer" },
-          "limit":        { "type": "integer" },
-          "total_pages":  { "type": "integer" }
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "total_pages": {
+            "type": "integer"
+          }
+        }
+      },
+      "CategoryBody": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Burgers"
+          },
+          "description": {
+            "type": "string",
+            "example": "Flame-grilled burgers",
+            "nullable": true
+          },
+          "sort_order": {
+            "type": "integer",
+            "default": 0
+          },
+          "has_toppings": {
+            "type": "boolean",
+            "default": false,
+            "description": "Show toppings selector for products in this category"
+          },
+          "has_crust": {
+            "type": "boolean",
+            "default": false,
+            "description": "Show crust selector for products in this category"
+          },
+          "is_active": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "CrustBody": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Stuffed Crust"
+          },
+          "extra_price": {
+            "type": "number",
+            "example": 50,
+            "default": 0
+          },
+          "sort_order": {
+            "type": "integer",
+            "default": 0
+          },
+          "is_available": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "ProductSizeBody": {
+        "type": "object",
+        "required": [
+          "size_name",
+          "price"
+        ],
+        "properties": {
+          "size_name": {
+            "type": "string",
+            "example": "Large"
+          },
+          "size_code": {
+            "type": "string",
+            "example": "LG"
+          },
+          "price": {
+            "type": "number",
+            "example": 329
+          },
+          "is_available": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "PayUCreateBody": {
+        "type": "object",
+        "required": [
+          "order_id"
+        ],
+        "properties": {
+          "order_id": {
+            "type": "integer",
+            "example": 42
+          },
+          "payment_method": {
+            "type": "string",
+            "enum": [
+              "upi",
+              "credit_card",
+              "debit_card",
+              "net_banking",
+              "wallet",
+              "cash_on_delivery"
+            ],
+            "default": "upi"
+          }
+        }
+      },
+      "PayUVerifyBody": {
+        "type": "object",
+        "required": [
+          "txnid",
+          "mihpayid",
+          "hash",
+          "order_id"
+        ],
+        "properties": {
+          "txnid": {
+            "type": "string",
+            "description": "PayU txnid returned from create-order"
+          },
+          "mihpayid": {
+            "type": "string",
+            "description": "PayU payment ID from payment callback"
+          },
+          "hash": {
+            "type": "string",
+            "description": "PayU response hash"
+          },
+          "status": {
+            "type": "string",
+            "example": "success"
+          },
+          "udf1": {
+            "type": "string",
+            "description": "order_id as string (echoed by PayU)"
+          },
+          "order_id": {
+            "type": "integer",
+            "description": "Internal order ID"
+          }
         }
       }
     }
   },
-  "security": [{ "bearerAuth": [] }],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
   "tags": [
-    { "name": "Auth",                  "description": "User authentication (OTP-based)" },
-    { "name": "Locations",             "description": "Branch locations" },
-    { "name": "Menu",                  "description": "Public menu — products, categories, toppings, crusts" },
-    { "name": "Orders",                "description": "Place and manage orders" },
-    { "name": "Coins",                 "description": "Loyalty coins — earn, redeem, history" },
-    { "name": "Feedback",              "description": "Order feedback and product ratings" },
-    { "name": "Coupons",               "description": "Coupon validation" },
-    { "name": "Notifications",         "description": "User notifications" },
-    { "name": "Refunds",               "description": "Refund requests" },
-    { "name": "Support",               "description": "Customer support tickets" },
-    { "name": "Admin — Auth",          "description": "Admin login" },
-    { "name": "Admin — Dashboard",     "description": "KPIs and reports" },
-    { "name": "Admin — Orders",        "description": "Order management, in-house billing, payment status" },
-    { "name": "Admin — Menu",          "description": "Products, toppings, location availability" },
-    { "name": "Admin — Toppings",      "description": "Topping CRUD" },
-    { "name": "Admin — Locations",     "description": "Branch location CRUD" },
-    { "name": "Admin — Coupons",       "description": "Coupon management" },
-    { "name": "Admin — Users",         "description": "User management" },
-    { "name": "Admin — Notifications", "description": "Admin notifications + user broadcast" },
-    { "name": "Admin — Refunds",       "description": "Refund processing" },
-    { "name": "Admin — Support",       "description": "Support ticket management" }
+    {
+      "name": "Auth",
+      "description": "User authentication (OTP-based)"
+    },
+    {
+      "name": "Locations",
+      "description": "Branch locations"
+    },
+    {
+      "name": "Menu",
+      "description": "Public menu — products, categories, toppings, crusts"
+    },
+    {
+      "name": "Orders",
+      "description": "Place and manage orders"
+    },
+    {
+      "name": "Coins",
+      "description": "Loyalty coins — earn, redeem, history"
+    },
+    {
+      "name": "Feedback",
+      "description": "Order feedback and product ratings"
+    },
+    {
+      "name": "Coupons",
+      "description": "Coupon validation"
+    },
+    {
+      "name": "Notifications",
+      "description": "User notifications"
+    },
+    {
+      "name": "Refunds",
+      "description": "Refund requests"
+    },
+    {
+      "name": "Support",
+      "description": "Customer support tickets"
+    },
+    {
+      "name": "Admin — Auth",
+      "description": "Admin login"
+    },
+    {
+      "name": "Admin — Dashboard",
+      "description": "KPIs and reports"
+    },
+    {
+      "name": "Admin — Orders",
+      "description": "Order management, in-house billing, payment status"
+    },
+    {
+      "name": "Admin — Menu",
+      "description": "Products, toppings, location availability"
+    },
+    {
+      "name": "Admin — Toppings",
+      "description": "Topping CRUD"
+    },
+    {
+      "name": "Admin — Locations",
+      "description": "Branch location CRUD"
+    },
+    {
+      "name": "Admin — Coupons",
+      "description": "Coupon management"
+    },
+    {
+      "name": "Admin — Users",
+      "description": "User management"
+    },
+    {
+      "name": "Admin — Notifications",
+      "description": "Admin notifications + user broadcast"
+    },
+    {
+      "name": "Admin — Refunds",
+      "description": "Refund processing"
+    },
+    {
+      "name": "Admin — Support",
+      "description": "Support ticket management"
+    }
   ],
   "paths": {
-
     "/locations": {
       "get": {
-        "tags": ["Locations"],
+        "tags": [
+          "Locations"
+        ],
         "summary": "Get all active locations, sorted by distance if lat/lng provided",
         "security": [],
         "parameters": [
-          { "in": "query", "name": "latitude",  "schema": { "type": "number" } },
-          { "in": "query", "name": "longitude", "schema": { "type": "number" } }
+          {
+            "in": "query",
+            "name": "latitude",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "longitude",
+            "schema": {
+              "type": "number"
+            }
+          }
         ],
-        "responses": { "200": { "description": "Array of Location objects" } }
+        "responses": {
+          "200": {
+            "description": "Array of Location objects"
+          }
+        }
       }
     },
     "/locations/nearest": {
       "get": {
-        "tags": ["Locations"],
+        "tags": [
+          "Locations"
+        ],
         "summary": "Get the nearest branch to given coordinates",
         "security": [],
         "parameters": [
-          { "in": "query", "name": "latitude",  "schema": { "type": "number" } },
-          { "in": "query", "name": "longitude", "schema": { "type": "number" } }
+          {
+            "in": "query",
+            "name": "latitude",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "longitude",
+            "schema": {
+              "type": "number"
+            }
+          }
         ],
-        "responses": { "200": { "description": "Single Location object with distance_km" } }
+        "responses": {
+          "200": {
+            "description": "Single Location object with distance_km"
+          }
+        }
       }
     },
     "/locations/{id}": {
       "get": {
-        "tags": ["Locations"],
+        "tags": [
+          "Locations"
+        ],
         "summary": "Get a single location by ID",
         "security": [],
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
-          "200": { "description": "Location object" },
-          "404": { "description": "Not found" }
+          "200": {
+            "description": "Location object"
+          },
+          "404": {
+            "description": "Not found"
+          }
         }
       }
     },
-
     "/auth/send-otp": {
       "post": {
-        "tags": ["Auth"], "summary": "Send OTP to email", "security": [],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["email"],
-          "properties": { "email": { "type": "string", "format": "email" } }
-        }}}},
-        "responses": { "200": { "description": "OTP sent to masked email" } }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Send OTP to email",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OTP sent to masked email"
+          }
+        }
       }
     },
     "/auth/resend-otp": {
       "post": {
-        "tags": ["Auth"], "summary": "Resend OTP", "security": [],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["email"],
-          "properties": { "email": { "type": "string", "format": "email" } }
-        }}}},
-        "responses": { "200": { "description": "OTP resent" } }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Resend OTP",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OTP resent"
+          }
+        }
       }
     },
     "/auth/register": {
       "post": {
-        "tags": ["Auth"], "summary": "Register new user with OTP verification", "security": [],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["name", "email", "otp"],
-          "properties": {
-            "name":   { "type": "string", "example": "John Doe" },
-            "email":  { "type": "string", "format": "email" },
-            "otp":    { "type": "string", "example": "482910" },
-            "mobile": { "type": "string", "example": "9876543210", "nullable": true }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Register new user with OTP verification",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "email",
+                  "otp"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "John Doe"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "example": "482910"
+                  },
+                  "mobile": {
+                    "type": "string",
+                    "example": "9876543210",
+                    "nullable": true
+                  }
+                }
+              }
+            }
           }
-        }}}},
-        "responses": { "201": { "description": "User created. Returns accessToken, refreshToken, and user object." } }
+        },
+        "responses": {
+          "201": {
+            "description": "User created. Returns accessToken, refreshToken, and user object."
+          }
+        }
       }
     },
     "/auth/login": {
       "post": {
-        "tags": ["Auth"], "summary": "Login with email OTP", "security": [],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["email", "otp"],
-          "properties": {
-            "email": { "type": "string", "format": "email" },
-            "otp":   { "type": "string" }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Login with email OTP",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "otp"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "otp": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "Returns accessToken, refreshToken, and user object." } }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns accessToken, refreshToken, and user object."
+          }
+        }
       }
     },
     "/auth/me": {
       "get": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Get current user profile — includes structured address fields and coin_balance",
         "responses": {
-          "200": { "description": "UserProfile object", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserProfile" } } } }
+          "200": {
+            "description": "UserProfile object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfile"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/auth/profile": {
       "put": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Update profile — supports both legacy address string and structured fields",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object",
-          "properties": {
-            "name":                  { "type": "string" },
-            "mobile":                { "type": "string" },
-            "address":               { "type": "string", "description": "Legacy single-string address (still supported)" },
-            "address_house":         { "type": "string", "example": "Flat 4B, Sunrise Apartments" },
-            "address_town":          { "type": "string", "example": "Indiranagar" },
-            "address_state":         { "type": "string", "example": "Karnataka" },
-            "address_pincode":       { "type": "string", "example": "560038" },
-            "latitude":              { "type": "number" },
-            "longitude":             { "type": "number" },
-            "preferred_location_id": { "type": "integer" }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "mobile": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string",
+                    "description": "Legacy single-string address (still supported)"
+                  },
+                  "address_house": {
+                    "type": "string",
+                    "example": "Flat 4B, Sunrise Apartments"
+                  },
+                  "address_town": {
+                    "type": "string",
+                    "example": "Indiranagar"
+                  },
+                  "address_state": {
+                    "type": "string",
+                    "example": "Karnataka"
+                  },
+                  "address_pincode": {
+                    "type": "string",
+                    "example": "560038"
+                  },
+                  "latitude": {
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "type": "number"
+                  },
+                  "preferred_location_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "Profile updated" } }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated"
+          }
+        }
       }
     },
     "/auth/refresh": {
       "post": {
-        "tags": ["Auth"], "summary": "Refresh access token", "security": [],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["refreshToken"],
-          "properties": { "refreshToken": { "type": "string" } }
-        }}}},
-        "responses": { "200": { "description": "New accessToken returned" } }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Refresh access token",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "refreshToken"
+                ],
+                "properties": {
+                  "refreshToken": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New accessToken returned"
+          }
+        }
       }
     },
     "/auth/logout": {
       "post": {
-        "tags": ["Auth"], "summary": "Logout (invalidates refresh token)",
-        "responses": { "200": { "description": "Logged out" } }
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout (invalidates refresh token)",
+        "responses": {
+          "200": {
+            "description": "Logged out"
+          }
+        }
       }
     },
-
     "/menu/categories": {
       "get": {
-        "tags": ["Menu"], "summary": "List all active categories", "security": [],
-        "responses": { "200": { "description": "Array of category objects" } }
+        "tags": [
+          "Menu"
+        ],
+        "summary": "List all active categories",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Array of category objects"
+          }
+        },
+        "description": "Returns active categories. Each object includes has_toppings and has_crust flags. Use these to decide whether to show topping/crust selectors in the UI."
       }
     },
     "/menu/products": {
       "get": {
-        "tags": ["Menu"],
+        "tags": [
+          "Menu"
+        ],
         "summary": "List products. Pass location_id to exclude items unavailable at that branch.",
         "security": [],
         "parameters": [
-          { "in": "query", "name": "location_id", "schema": { "type": "integer" }, "description": "Filters out products disabled at this location" },
-          { "in": "query", "name": "category_id", "schema": { "type": "integer" } },
-          { "in": "query", "name": "is_veg",      "schema": { "type": "boolean" } },
-          { "in": "query", "name": "search",      "schema": { "type": "string" } },
-          { "in": "query", "name": "page",        "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit",       "schema": { "type": "integer", "default": 20 } }
+          {
+            "in": "query",
+            "name": "location_id",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Filters out products disabled at this location"
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "is_veg",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
         ],
-        "responses": { "200": { "description": "Paginated product list" } }
+        "responses": {
+          "200": {
+            "description": "Paginated product list"
+          }
+        }
       }
     },
     "/menu/products/featured": {
       "get": {
-        "tags": ["Menu"], "summary": "Get featured products", "security": [],
-        "parameters": [{ "in": "query", "name": "location_id", "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "Array of featured products" } }
+        "tags": [
+          "Menu"
+        ],
+        "summary": "Get featured products",
+        "security": [],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "location_id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of featured products"
+          }
+        }
       }
     },
     "/menu/products/{id}": {
       "get": {
-        "tags": ["Menu"],
+        "tags": [
+          "Menu"
+        ],
         "summary": "Get single product with sizes, crusts, available toppings and ratings",
         "security": [],
         "parameters": [
-          { "in": "path",  "name": "id",          "required": true, "schema": { "type": "integer" } },
-          { "in": "query", "name": "location_id", "schema": { "type": "integer" } }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "location_id",
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Product detail with sizes, crusts, toppings, avg_rating" },
-          "404": { "description": "Not found or unavailable at location" }
-        }
+          "200": {
+            "description": "Product detail with sizes, crusts, toppings, avg_rating"
+          },
+          "404": {
+            "description": "Not found or unavailable at location"
+          }
+        },
+        "description": "Full product detail. crusts array is only populated if the category has has_crust=true. toppings array is only populated if the category has has_toppings=true. Check has_toppings and has_crust to conditionally render selectors."
       }
     },
     "/menu/toppings": {
       "get": {
-        "tags": ["Menu"], "summary": "List all available toppings", "security": [],
-        "parameters": [{ "in": "query", "name": "is_veg", "schema": { "type": "boolean" } }],
-        "responses": { "200": { "description": "Array of Topping objects" } }
+        "tags": [
+          "Menu"
+        ],
+        "summary": "List all available toppings",
+        "security": [],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "is_veg",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of Topping objects"
+          }
+        }
       }
     },
     "/menu/crusts": {
       "get": {
-        "tags": ["Menu"], "summary": "List all available crust types", "security": [],
-        "responses": { "200": { "description": "Array of crust objects" } }
+        "tags": [
+          "Menu"
+        ],
+        "summary": "List all available crust types",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Array of crust objects"
+          }
+        }
       }
     },
-
     "/orders/calculate": {
       "post": {
-        "tags": ["Orders"],
+        "tags": [
+          "Orders"
+        ],
         "summary": "Calculate order total — supports coupon + coins redemption preview",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CalculateOrderBody" } } } },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalculateOrderBody"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Breakdown of subtotal, discounts, coins, taxes and final total",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CalculateOrderResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalculateOrderResponse"
+                }
+              }
+            }
           }
-        }
+        },
+        "description": "Preview totals before placing order. tax_amount is always 0. total_amount = subtotal - discount_amount - coins_discount + delivery_fee"
       }
     },
     "/orders": {
       "post": {
-        "tags": ["Orders"], "summary": "Place a new order",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PlaceOrderBody" } } } },
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Place a new order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaceOrderBody"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "Order placed. Returns order_id, order_number, total_amount, coins_redeemed, coins_discount.",
-            "content": { "application/json": { "schema": {
-              "type": "object",
-              "properties": {
-                "order_id":      { "type": "integer" },
-                "order_number":  { "type": "string", "example": "GOBT-123456" },
-                "total_amount":  { "type": "number" },
-                "coins_redeemed":{ "type": "integer", "description": "Coins deducted from wallet" },
-                "coins_discount":{ "type": "number",  "description": "Rupee value of coins discount" }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order_id": {
+                      "type": "integer"
+                    },
+                    "order_number": {
+                      "type": "string",
+                      "example": "GOBT-123456"
+                    },
+                    "total_amount": {
+                      "type": "number"
+                    },
+                    "coins_redeemed": {
+                      "type": "integer",
+                      "description": "Coins deducted from wallet"
+                    },
+                    "coins_discount": {
+                      "type": "number",
+                      "description": "Rupee value of coins discount"
+                    }
+                  }
+                }
               }
-            }}}
+            }
           }
         }
       },
       "get": {
-        "tags": ["Orders"], "summary": "Get my orders (paginated)",
-        "parameters": [
-          { "in": "query", "name": "status", "schema": { "type": "string", "enum": ["pending","confirmed","preparing","out_for_delivery","delivered","cancelled","refund_requested","refunded"] } },
-          { "in": "query", "name": "page",   "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit",  "schema": { "type": "integer", "default": 10 } }
+        "tags": [
+          "Orders"
         ],
-        "responses": { "200": { "description": "Paginated order list" } }
+        "summary": "Get my orders (paginated)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "confirmed",
+                "preparing",
+                "out_for_delivery",
+                "delivered",
+                "cancelled",
+                "refund_requested",
+                "refunded"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated order list"
+          }
+        }
       }
     },
     "/orders/coins": {
       "get": {
-        "tags": ["Coins"],
+        "tags": [
+          "Coins"
+        ],
         "summary": "Get my coin wallet balance and full transaction history",
         "responses": {
           "200": {
             "description": "Wallet balance and last 50 transactions",
-            "content": { "application/json": { "schema": {
-              "type": "object",
-              "properties": {
-                "balance":      { "type": "integer", "example": 120 },
-                "transactions": { "type": "array", "items": { "$ref": "#/components/schemas/CoinTransaction" } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "balance": {
+                      "type": "integer",
+                      "example": 120
+                    },
+                    "transactions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CoinTransaction"
+                      }
+                    }
+                  }
+                }
               }
-            }}}
+            }
           }
         }
       }
     },
     "/orders/{id}": {
       "get": {
-        "tags": ["Orders"], "summary": "Get order detail with items, status history, payment and feedback",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Get order detail with items, status history, payment and feedback",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
-          "200": { "description": "Full order object including items (with toppings), status_history, payment, feedback" },
-          "404": { "description": "Not found" }
+          "200": {
+            "description": "Full order object including items (with toppings), status_history, payment, feedback"
+          },
+          "404": {
+            "description": "Not found"
+          }
         }
       }
     },
     "/orders/{id}/invoice": {
       "get": {
-        "tags": ["Orders"], "summary": "Get invoice data for an order",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "Invoice object with line items, taxes (CGST/SGST), and coins_redeemed" } }
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Get invoice data for an order",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invoice object with line items, taxes (CGST/SGST), and coins_redeemed"
+          }
+        }
       }
     },
     "/orders/{id}/cancel": {
       "post": {
-        "tags": ["Orders"], "summary": "Cancel an order (only pending or confirmed status)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "content": { "application/json": { "schema": {
-          "type": "object",
-          "properties": { "reason": { "type": "string", "example": "Changed my mind" } }
-        }}}},
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Cancel an order (only pending or confirmed status)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "example": "Changed my mind"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Cancelled. Redeemed coins are automatically restored to wallet." },
-          "400": { "description": "Cannot cancel at this stage" }
+          "200": {
+            "description": "Cancelled. Redeemed coins are automatically restored to wallet."
+          },
+          "400": {
+            "description": "Cannot cancel at this stage"
+          }
         }
       }
     },
     "/orders/{id}/reorder": {
       "post": {
-        "tags": ["Orders"], "summary": "Get cart items from a previous order for reordering",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "Array of cart items ready to pass to /orders" } }
+        "tags": [
+          "Orders"
+        ],
+        "summary": "Get cart items from a previous order for reordering",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of cart items ready to pass to /orders"
+          }
+        }
       }
     },
     "/orders/{id}/feedback": {
       "post": {
-        "tags": ["Feedback"],
+        "tags": [
+          "Feedback"
+        ],
         "summary": "Submit feedback for a delivered order (food, delivery, overall ratings + comment)",
         "description": "Only allowed on orders with status = 'delivered'. One feedback per order.",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrderFeedbackBody" } } } },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderFeedbackBody"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "Feedback submitted" },
-          "400": { "description": "Order not delivered or feedback already submitted" }
+          "201": {
+            "description": "Feedback submitted"
+          },
+          "400": {
+            "description": "Order not delivered or feedback already submitted"
+          }
         }
       }
     },
-
     "/ratings": {
       "post": {
-        "tags": ["Feedback"], "summary": "Rate an individual product from a delivered order",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["order_id", "product_id", "rating"],
-          "properties": {
-            "order_id":   { "type": "integer" },
-            "product_id": { "type": "integer" },
-            "rating":     { "type": "integer", "minimum": 1, "maximum": 5 },
-            "review":     { "type": "string", "nullable": true }
+        "tags": [
+          "Feedback"
+        ],
+        "summary": "Rate an individual product from a delivered order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "order_id",
+                  "product_id",
+                  "rating"
+                ],
+                "properties": {
+                  "order_id": {
+                    "type": "integer"
+                  },
+                  "product_id": {
+                    "type": "integer"
+                  },
+                  "rating": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "review": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
           }
-        }}}},
-        "responses": { "201": { "description": "Rating submitted" } }
+        },
+        "responses": {
+          "201": {
+            "description": "Rating submitted"
+          }
+        }
       }
     },
     "/ratings/product/{id}": {
       "get": {
-        "tags": ["Feedback"], "summary": "Get all ratings for a product",
+        "tags": [
+          "Feedback"
+        ],
+        "summary": "Get all ratings for a product",
         "security": [],
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "avg_rating and array of reviews" } }
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "avg_rating and array of reviews"
+          }
+        }
       }
     },
-
     "/coupons": {
       "get": {
-        "tags": ["Coupons"], "summary": "List all currently active and valid coupons",
-        "responses": { "200": { "description": "Array of coupon objects (public fields only)" } }
+        "tags": [
+          "Coupons"
+        ],
+        "summary": "List all currently active and valid coupons",
+        "responses": {
+          "200": {
+            "description": "Array of coupon objects (public fields only)"
+          }
+        }
       }
     },
     "/coupons/validate": {
       "post": {
-        "tags": ["Coupons"], "summary": "Validate a coupon code and calculate discount",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["code", "order_value"],
-          "properties": {
-            "code":        { "type": "string", "example": "SAVE20" },
-            "order_value": { "type": "number",  "example": 500 }
+        "tags": [
+          "Coupons"
+        ],
+        "summary": "Validate a coupon code and calculate discount",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "order_value"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "example": "SAVE20"
+                  },
+                  "order_value": {
+                    "type": "number",
+                    "example": 500
+                  }
+                }
+              }
+            }
           }
-        }}}},
+        },
         "responses": {
-          "200": { "description": "Coupon details with calculated_discount" },
-          "400": { "description": "Invalid, expired, or per-user limit reached" }
+          "200": {
+            "description": "Coupon details with calculated_discount"
+          },
+          "400": {
+            "description": "Invalid, expired, or per-user limit reached"
+          }
         }
       }
     },
-
     "/notifications": {
       "get": {
-        "tags": ["Notifications"], "summary": "Get my notifications (last 50)",
-        "responses": { "200": { "description": "notifications array and unread_count" } }
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Get my notifications (last 50)",
+        "responses": {
+          "200": {
+            "description": "notifications array and unread_count"
+          }
+        }
       }
     },
     "/notifications/read-all": {
       "put": {
-        "tags": ["Notifications"], "summary": "Mark all my notifications as read",
-        "responses": { "200": { "description": "Marked" } }
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark all my notifications as read",
+        "responses": {
+          "200": {
+            "description": "Marked"
+          }
+        }
       }
     },
     "/notifications/{id}/read": {
       "put": {
-        "tags": ["Notifications"], "summary": "Mark a single notification as read",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "Marked" } }
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark a single notification as read",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Marked"
+          }
+        }
       }
     },
-
     "/refunds/request": {
       "post": {
-        "tags": ["Refunds"], "summary": "Request a refund for an eligible order",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["order_id", "reason"],
-          "properties": {
-            "order_id": { "type": "integer" },
-            "reason":   { "type": "string", "example": "Wrong items delivered" }
+        "tags": [
+          "Refunds"
+        ],
+        "summary": "Request a refund for an eligible order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "order_id",
+                  "reason"
+                ],
+                "properties": {
+                  "order_id": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "example": "Wrong items delivered"
+                  }
+                }
+              }
+            }
           }
-        }}}},
+        },
         "responses": {
-          "201": { "description": "Refund request submitted. Earned coins will be reverted if refund is approved." },
-          "400": { "description": "Not eligible or already requested" }
+          "201": {
+            "description": "Refund request submitted. Earned coins will be reverted if refund is approved."
+          },
+          "400": {
+            "description": "Not eligible or already requested"
+          }
         }
       }
     },
     "/refunds/my-refunds": {
       "get": {
-        "tags": ["Refunds"], "summary": "Get my refund requests",
-        "responses": { "200": { "description": "Array of refund objects" } }
+        "tags": [
+          "Refunds"
+        ],
+        "summary": "Get my refund requests",
+        "responses": {
+          "200": {
+            "description": "Array of refund objects"
+          }
+        }
       }
     },
-
     "/support/tickets": {
-      "get":  { "tags": ["Support"], "summary": "Get my support tickets", "responses": { "200": { "description": "Tickets" } } },
-      "post": {
-        "tags": ["Support"], "summary": "Create a new support ticket",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["subject", "category"],
-          "properties": {
-            "subject":  { "type": "string" },
-            "order_id": { "type": "integer", "nullable": true },
-            "category": { "type": "string", "enum": ["order_issue","payment","refund","delivery","other"] },
-            "message":  { "type": "string" }
+      "get": {
+        "tags": [
+          "Support"
+        ],
+        "summary": "Get my support tickets",
+        "responses": {
+          "200": {
+            "description": "Tickets"
           }
-        }}}},
-        "responses": { "201": { "description": "Ticket created" } }
+        }
+      },
+      "post": {
+        "tags": [
+          "Support"
+        ],
+        "summary": "Create a new support ticket",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "subject",
+                  "category"
+                ],
+                "properties": {
+                  "subject": {
+                    "type": "string"
+                  },
+                  "order_id": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "order_issue",
+                      "payment",
+                      "refund",
+                      "delivery",
+                      "other"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Ticket created"
+          }
+        }
       }
     },
     "/support/tickets/{id}/messages": {
-      "get":  { "tags": ["Support"], "summary": "Get messages in a ticket", "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "Messages" } } },
+      "get": {
+        "tags": [
+          "Support"
+        ],
+        "summary": "Get messages in a ticket",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messages"
+          }
+        }
+      },
       "post": {
-        "tags": ["Support"], "summary": "Reply to a ticket",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["message"],
-          "properties": { "message": { "type": "string" } }
-        }}}},
-        "responses": { "201": { "description": "Reply sent" } }
+        "tags": [
+          "Support"
+        ],
+        "summary": "Reply to a ticket",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reply sent"
+          }
+        }
       }
     },
-
     "/admin/auth/login": {
       "post": {
-        "tags": ["Admin — Auth"],
+        "tags": [
+          "Admin — Auth"
+        ],
         "summary": "Admin login — returns JWT token scoped to location",
         "security": [],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["email", "password"],
-          "properties": {
-            "email":       { "type": "string", "format": "email" },
-            "password":    { "type": "string" },
-            "location_id": { "type": "integer", "description": "Optional — super_admin only. Scopes the session to a branch.", "nullable": true }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "location_id": {
+                    "type": "integer",
+                    "description": "Optional — super_admin only. Scopes the session to a branch.",
+                    "nullable": true
+                  }
+                }
+              }
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "token + admin object including role, location_id, location_name" } }
+        },
+        "responses": {
+          "200": {
+            "description": "token + admin object including role, location_id, location_name"
+          }
+        }
       }
     },
-
     "/admin/dashboard": {
       "get": {
-        "tags": ["Admin — Dashboard"],
+        "tags": [
+          "Admin — Dashboard"
+        ],
         "summary": "KPI summary — today's orders/revenue, pending orders, popular products. Auto-scoped to admin's location.",
-        "responses": { "200": { "description": "Dashboard KPI object" } }
+        "responses": {
+          "200": {
+            "description": "Dashboard KPI object"
+          }
+        }
       }
     },
     "/admin/dashboard/reports": {
       "get": {
-        "tags": ["Admin — Dashboard"], "summary": "Revenue & order reports by period",
-        "parameters": [{ "in": "query", "name": "period", "schema": { "type": "string", "enum": ["daily","weekly","monthly"], "default": "daily" } }],
-        "responses": { "200": { "description": "Array of report rows" } }
+        "tags": [
+          "Admin — Dashboard"
+        ],
+        "summary": "Revenue & order reports by period",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "daily",
+                "weekly",
+                "monthly"
+              ],
+              "default": "daily"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of report rows"
+          }
+        }
       }
     },
-
     "/admin/orders": {
       "get": {
-        "tags": ["Admin — Orders"],
+        "tags": [
+          "Admin — Orders"
+        ],
         "summary": "List all orders — auto-filtered by admin's location. Super-admin can pass location_id.",
         "parameters": [
-          { "in": "query", "name": "status",         "schema": { "type": "string", "enum": ["pending","confirmed","preparing","out_for_delivery","delivered","cancelled","refund_requested","refunded"] } },
-          { "in": "query", "name": "payment_status", "schema": { "type": "string", "enum": ["pending","paid","failed","refunded"], "description": "Filter by payment status — useful to find unpaid COD orders" } },
-          { "in": "query", "name": "location_id",    "schema": { "type": "integer" }, "description": "super_admin only" },
-          { "in": "query", "name": "page",           "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit",          "schema": { "type": "integer", "default": 20 } }
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "confirmed",
+                "preparing",
+                "out_for_delivery",
+                "delivered",
+                "cancelled",
+                "refund_requested",
+                "refunded"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "payment_status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "paid",
+                "failed",
+                "refunded"
+              ],
+              "description": "Filter by payment status — useful to find unpaid COD orders"
+            }
+          },
+          {
+            "in": "query",
+            "name": "location_id",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "super_admin only"
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
         ],
-        "responses": { "200": { "description": "Paginated orders with user_name, user_mobile, location_name, payment_method, coins_redeemed" } }
+        "responses": {
+          "200": {
+            "description": "Paginated orders with user_name, user_mobile, location_name, payment_method, coins_redeemed"
+          }
+        }
       }
     },
     "/admin/orders/inhouse": {
       "post": {
-        "tags": ["Admin — Orders"],
+        "tags": [
+          "Admin — Orders"
+        ],
         "summary": "Place an in-house / walk-in order on behalf of a user (or anonymously)",
-        "description": "Used for billing at the counter. Admin's location is auto-applied. Set payment_method to cash_on_delivery then use /payment-status to mark paid when cash is received.",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminPlaceOrderBody" } } } },
+        "description": "Place an in-house / walk-in order at the counter. Auto-confirms immediately. COD orders are auto-marked as paid — no /payment-status step required. No tax applied. total_amount = subtotal + delivery_fee.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminPlaceOrderBody"
+              }
+            }
+          }
+        },
         "responses": {
-          "201": { "description": "In-house order created. Returns order_id, order_number, total_amount, payment_method." }
+          "201": {
+            "description": "In-house order created. Returns order_id, order_number, total_amount, payment_method."
+          }
         }
       }
     },
     "/admin/orders/{id}": {
       "get": {
-        "tags": ["Admin — Orders"],
+        "tags": [
+          "Admin — Orders"
+        ],
         "summary": "Get full order detail — items, toppings, status history, payment, customer info, feedback",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
-          "200": { "description": "Complete order object" },
-          "404": { "description": "Not found (or not in admin's location scope)" }
+          "200": {
+            "description": "Complete order object"
+          },
+          "404": {
+            "description": "Not found (or not in admin's location scope)"
+          }
         }
       }
     },
     "/admin/orders/{id}/status": {
       "put": {
-        "tags": ["Admin — Orders"],
+        "tags": [
+          "Admin — Orders"
+        ],
         "summary": "Update order status — validates allowed transitions. Triggers user notification. Credits coins on 'delivered'.",
         "description": "Allowed transitions: pending→confirmed/cancelled, confirmed→preparing/cancelled, preparing→out_for_delivery/cancelled, out_for_delivery→delivered, delivered→refund_requested",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["status"],
-          "properties": {
-            "status": { "type": "string", "enum": ["confirmed","preparing","out_for_delivery","delivered","cancelled","refund_requested"] },
-            "note":   { "type": "string", "nullable": true }
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
           }
-        }}}},
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "confirmed",
+                      "preparing",
+                      "out_for_delivery",
+                      "delivered",
+                      "cancelled",
+                      "refund_requested"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
-          "200": { "description": "Status updated. If delivered, coins are automatically credited to user (1 coin per Rs.10)." },
-          "400": { "description": "Invalid transition" }
+          "200": {
+            "description": "Status updated. If delivered, coins are automatically credited to user (1 coin per Rs.10)."
+          },
+          "400": {
+            "description": "Invalid transition"
+          }
         }
       }
     },
     "/admin/orders/{id}/payment-status": {
       "put": {
-        "tags": ["Admin — Orders"],
+        "tags": [
+          "Admin — Orders"
+        ],
         "summary": "Update payment status — use to mark COD orders as paid when cash is received",
         "description": "For COD orders: mark 'paid' once cash is collected. For prepaid: status is updated automatically by payment gateway. User receives a notification on any change.",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["payment_status"],
-          "properties": {
-            "payment_status": { "type": "string", "enum": ["pending","paid","failed","refunded"] },
-            "note":           { "type": "string", "nullable": true, "example": "Cash received at counter" }
-          }
-        }}}},
-        "responses": { "200": { "description": "Payment status updated and user notified" } }
-      }
-    },
-    "/admin/orders/{id}/invoice": {
-      "get": {
-        "tags": ["Admin — Orders"],
-        "summary": "Get invoice for any order — works for walk-ins too (shows 'Walk-in' as customer name)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "Invoice object including coins_redeemed, payment_method, payment_status" } }
-      }
-    },
-
-    "/admin/menu/products": {
-      "get": {
-        "tags": ["Admin — Menu"],
-        "summary": "Get ALL products including unavailable. Returns location_available for scoped admins.",
         "parameters": [
-          { "in": "query", "name": "show_unavailable", "schema": { "type": "boolean" }, "description": "true = include globally disabled products" },
-          { "in": "query", "name": "search",           "schema": { "type": "string" } },
-          { "in": "query", "name": "category_id",      "schema": { "type": "integer" } },
-          { "in": "query", "name": "page",             "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit",            "schema": { "type": "integer", "default": 50 } }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
-        "responses": { "200": { "description": "Paginated products with category_name and location_available" } }
-      },
-      "post": {
-        "tags": ["Admin — Menu"], "summary": "Create a new product",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["name", "base_price", "category_id"],
-          "properties": {
-            "name":        { "type": "string" },
-            "category_id": { "type": "integer" },
-            "base_price":  { "type": "number" },
-            "description": { "type": "string", "nullable": true },
-            "is_veg":      { "type": "boolean", "default": true },
-            "is_featured": { "type": "boolean", "default": false },
-            "sizes": {
-              "type": "array",
-              "description": "If omitted, a single 'Regular' size is created at base_price",
-              "items": {
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
                 "type": "object",
+                "required": [
+                  "payment_status"
+                ],
                 "properties": {
-                  "size_name": { "type": "string", "example": "Large" },
-                  "size_code": { "type": "string", "example": "LRG" },
-                  "price":     { "type": "number", "example": 350 }
+                  "payment_status": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "paid",
+                      "failed",
+                      "refunded"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "nullable": true,
+                    "example": "Cash received at counter"
+                  }
                 }
               }
             }
           }
-        }}}},
-        "responses": { "201": { "description": "Product created with product_id" } }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment status updated and user notified"
+          }
+        }
+      }
+    },
+    "/admin/orders/{id}/invoice": {
+      "get": {
+        "tags": [
+          "Admin — Orders"
+        ],
+        "summary": "Get invoice for any order — works for walk-ins too (shows 'Walk-in' as customer name)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invoice object including coins_redeemed, payment_method, payment_status"
+          }
+        }
+      }
+    },
+    "/admin/menu/products": {
+      "get": {
+        "tags": [
+          "Admin — Menu"
+        ],
+        "summary": "Get ALL products including unavailable. Returns location_available for scoped admins.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "show_unavailable",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "true = include globally disabled products"
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated products with category_name and location_available"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin — Menu"
+        ],
+        "summary": "Create a new product",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "base_price",
+                  "category_id"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "category_id": {
+                    "type": "integer"
+                  },
+                  "base_price": {
+                    "type": "number"
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "is_veg": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "is_featured": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "sizes": {
+                    "type": "array",
+                    "description": "If omitted, a single 'Regular' size is created at base_price",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "size_name": {
+                          "type": "string",
+                          "example": "Large"
+                        },
+                        "size_code": {
+                          "type": "string",
+                          "example": "LRG"
+                        },
+                        "price": {
+                          "type": "number",
+                          "example": 350
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Product created with product_id"
+          }
+        }
       }
     },
     "/admin/menu/products/{id}": {
       "put": {
-        "tags": ["Admin — Menu"], "summary": "Update product (global — affects all locations)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "content": { "application/json": { "schema": {
-          "type": "object",
-          "properties": {
-            "name": { "type": "string" }, "description": { "type": "string" },
-            "base_price": { "type": "number" }, "is_veg": { "type": "boolean" },
-            "is_featured": { "type": "boolean" }, "is_available": { "type": "boolean" }
+        "tags": [
+          "Admin — Menu"
+        ],
+        "summary": "Update product (global — affects all locations)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "Updated" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "base_price": {
+                    "type": "number"
+                  },
+                  "is_veg": {
+                    "type": "boolean"
+                  },
+                  "is_featured": {
+                    "type": "boolean"
+                  },
+                  "is_available": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
       },
       "delete": {
-        "tags": ["Admin — Menu"], "summary": "Soft-delete product (hides from all menus)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "Removed from menu" } }
+        "tags": [
+          "Admin — Menu"
+        ],
+        "summary": "Soft-delete product (hides from all menus)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed from menu"
+          }
+        }
       }
     },
     "/admin/menu/products/{id}/image": {
       "post": {
-        "tags": ["Admin — Menu"], "summary": "Upload product image (JPEG/PNG/WebP, max 5MB)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": {
-          "type": "object", "properties": { "image": { "type": "string", "format": "binary" } }
-        }}}},
-        "responses": { "200": { "description": "image_url returned" } }
+        "tags": [
+          "Admin — Menu"
+        ],
+        "summary": "Upload product image (JPEG/PNG/WebP, max 5MB)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "image_url returned"
+          }
+        }
       }
     },
     "/admin/menu/products/{id}/location-availability": {
       "put": {
-        "tags": ["Admin — Menu"],
+        "tags": [
+          "Admin — Menu"
+        ],
         "summary": "Toggle product availability at a specific location (per-location override)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["is_available"],
-          "properties": {
-            "is_available": { "type": "boolean" },
-            "location_id":  { "type": "integer", "description": "Required for super_admin only; ignored for location-scoped admins" }
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "Availability updated at location" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "is_available"
+                ],
+                "properties": {
+                  "is_available": {
+                    "type": "boolean"
+                  },
+                  "location_id": {
+                    "type": "integer",
+                    "description": "Required for super_admin only; ignored for location-scoped admins"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Availability updated at location"
+          }
+        }
       }
     },
     "/admin/menu/products/{id}/availability-matrix": {
       "get": {
-        "tags": ["Admin — Menu"],
+        "tags": [
+          "Admin — Menu"
+        ],
         "summary": "Get availability for this product across ALL locations (super_admin view)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "Array of {location_id, location_name, is_available}" } }
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of {location_id, location_name, is_available}"
+          }
+        }
       }
     },
-
     "/admin/menu/toppings": {
       "get": {
-        "tags": ["Admin — Toppings"], "summary": "List all toppings (including unavailable)",
-        "responses": { "200": { "description": "Array of Topping objects" } }
+        "tags": [
+          "Admin — Toppings"
+        ],
+        "summary": "List all toppings (including unavailable)",
+        "responses": {
+          "200": {
+            "description": "Array of Topping objects"
+          }
+        }
       },
       "post": {
-        "tags": ["Admin — Toppings"], "summary": "Create a new topping",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["name", "price"],
-          "properties": {
-            "name":       { "type": "string",  "example": "Extra Cheese" },
-            "price":      { "type": "number",  "example": 30 },
-            "is_veg":     { "type": "boolean", "default": true },
-            "sort_order": { "type": "integer", "default": 0 }
+        "tags": [
+          "Admin — Toppings"
+        ],
+        "summary": "Create a new topping",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "price"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Extra Cheese"
+                  },
+                  "price": {
+                    "type": "number",
+                    "example": 30
+                  },
+                  "is_veg": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "sort_order": {
+                    "type": "integer",
+                    "default": 0
+                  }
+                }
+              }
+            }
           }
-        }}}},
-        "responses": { "201": { "description": "Topping created with topping_id" } }
+        },
+        "responses": {
+          "201": {
+            "description": "Topping created with topping_id"
+          }
+        }
       }
     },
     "/admin/menu/toppings/{id}": {
       "put": {
-        "tags": ["Admin — Toppings"], "summary": "Update a topping",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "content": { "application/json": { "schema": {
-          "type": "object",
-          "properties": {
-            "name":         { "type": "string" },
-            "price":        { "type": "number" },
-            "is_veg":       { "type": "boolean" },
-            "is_available": { "type": "boolean" },
-            "sort_order":   { "type": "integer" }
+        "tags": [
+          "Admin — Toppings"
+        ],
+        "summary": "Update a topping",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "Updated" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "type": "number"
+                  },
+                  "is_veg": {
+                    "type": "boolean"
+                  },
+                  "is_available": {
+                    "type": "boolean"
+                  },
+                  "sort_order": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
       },
       "delete": {
-        "tags": ["Admin — Toppings"], "summary": "Disable a topping (soft delete)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "Topping disabled" } }
+        "tags": [
+          "Admin — Toppings"
+        ],
+        "summary": "Disable a topping (soft delete)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Topping disabled"
+          }
+        }
       }
     },
-
     "/admin/locations": {
       "get": {
-        "tags": ["Admin — Locations"], "summary": "List all locations (including inactive)",
-        "responses": { "200": { "description": "Array of Location objects" } }
+        "tags": [
+          "Admin — Locations"
+        ],
+        "summary": "List all locations (including inactive)",
+        "responses": {
+          "200": {
+            "description": "Array of Location objects"
+          }
+        }
       },
       "post": {
-        "tags": ["Admin — Locations"], "summary": "Create a new branch location (super_admin only)",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["name", "address", "city", "latitude", "longitude"],
-          "properties": {
-            "name":         { "type": "string",  "example": "Koramangala Branch" },
-            "address":      { "type": "string",  "example": "123 Main St" },
-            "city":         { "type": "string",  "example": "Bengaluru" },
-            "latitude":     { "type": "number",  "example": 12.9352 },
-            "longitude":    { "type": "number",  "example": 77.6245 },
-            "phone":        { "type": "string",  "nullable": true },
-            "email":        { "type": "string",  "nullable": true },
-            "opening_time": { "type": "string",  "example": "10:00:00" },
-            "closing_time": { "type": "string",  "example": "23:00:00" }
+        "tags": [
+          "Admin — Locations"
+        ],
+        "summary": "Create a new branch location (super_admin only)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "address",
+                  "city",
+                  "latitude",
+                  "longitude"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "example": "Koramangala Branch"
+                  },
+                  "address": {
+                    "type": "string",
+                    "example": "123 Main St"
+                  },
+                  "city": {
+                    "type": "string",
+                    "example": "Bengaluru"
+                  },
+                  "latitude": {
+                    "type": "number",
+                    "example": 12.9352
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "example": 77.6245
+                  },
+                  "phone": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "email": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "opening_time": {
+                    "type": "string",
+                    "example": "10:00:00"
+                  },
+                  "closing_time": {
+                    "type": "string",
+                    "example": "23:00:00"
+                  }
+                }
+              }
+            }
           }
-        }}}},
-        "responses": { "201": { "description": "Location created with location_id" } }
+        },
+        "responses": {
+          "201": {
+            "description": "Location created with location_id"
+          }
+        }
       }
     },
     "/admin/locations/{id}": {
       "put": {
-        "tags": ["Admin — Locations"], "summary": "Update a branch location (super_admin only)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "content": { "application/json": { "schema": {
-          "type": "object",
-          "properties": {
-            "name":         { "type": "string" }, "address": { "type": "string" },
-            "city":         { "type": "string" }, "latitude": { "type": "number" },
-            "longitude":    { "type": "number" }, "phone": { "type": "string" },
-            "email":        { "type": "string" }, "is_active": { "type": "boolean" },
-            "opening_time": { "type": "string" }, "closing_time": { "type": "string" }
+        "tags": [
+          "Admin — Locations"
+        ],
+        "summary": "Update a branch location (super_admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "Location updated" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": "string"
+                  },
+                  "latitude": {
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "type": "number"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  },
+                  "opening_time": {
+                    "type": "string"
+                  },
+                  "closing_time": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Location updated"
+          }
+        }
       }
     },
-
     "/admin/coupons": {
       "get": {
-        "tags": ["Admin — Coupons"], "summary": "List all coupons (including expired and inactive)",
-        "responses": { "200": { "description": "Array of full Coupon objects" } }
+        "tags": [
+          "Admin — Coupons"
+        ],
+        "summary": "List all coupons (including expired and inactive)",
+        "responses": {
+          "200": {
+            "description": "Array of full Coupon objects"
+          }
+        }
       },
       "post": {
-        "tags": ["Admin — Coupons"], "summary": "Create a new coupon",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["code", "discount_type", "discount_value", "valid_from", "valid_until"],
-          "properties": {
-            "code":            { "type": "string",  "example": "SAVE20" },
-            "description":     { "type": "string",  "nullable": true },
-            "discount_type":   { "type": "string",  "enum": ["percentage", "flat"] },
-            "discount_value":  { "type": "number",  "example": 20 },
-            "min_order_value": { "type": "number",  "example": 200, "default": 0 },
-            "max_discount":    { "type": "number",  "nullable": true, "example": 100 },
-            "usage_limit":     { "type": "integer", "nullable": true },
-            "per_user_limit":  { "type": "integer", "default": 1 },
-            "valid_from":      { "type": "string",  "format": "date-time" },
-            "valid_until":     { "type": "string",  "format": "date-time" }
+        "tags": [
+          "Admin — Coupons"
+        ],
+        "summary": "Create a new coupon",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "discount_type",
+                  "discount_value",
+                  "valid_from",
+                  "valid_until"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "example": "SAVE20"
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "discount_type": {
+                    "type": "string",
+                    "enum": [
+                      "percentage",
+                      "flat"
+                    ]
+                  },
+                  "discount_value": {
+                    "type": "number",
+                    "example": 20
+                  },
+                  "min_order_value": {
+                    "type": "number",
+                    "example": 200,
+                    "default": 0
+                  },
+                  "max_discount": {
+                    "type": "number",
+                    "nullable": true,
+                    "example": 100
+                  },
+                  "usage_limit": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "per_user_limit": {
+                    "type": "integer",
+                    "default": 1
+                  },
+                  "valid_from": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "valid_until": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
           }
-        }}}},
-        "responses": { "201": { "description": "Coupon created" } }
+        },
+        "responses": {
+          "201": {
+            "description": "Coupon created"
+          }
+        }
       }
     },
     "/admin/coupons/{id}": {
       "put": {
-        "tags": ["Admin — Coupons"], "summary": "Update a coupon (e.g. deactivate, extend validity, change discount)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "content": { "application/json": { "schema": {
-          "type": "object",
-          "properties": {
-            "is_active":       { "type": "boolean" },
-            "description":     { "type": "string" },
-            "discount_value":  { "type": "number" },
-            "min_order_value": { "type": "number" },
-            "max_discount":    { "type": "number" },
-            "usage_limit":     { "type": "integer" },
-            "valid_until":     { "type": "string", "format": "date-time" }
+        "tags": [
+          "Admin — Coupons"
+        ],
+        "summary": "Update a coupon (e.g. deactivate, extend validity, change discount)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "Coupon updated" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "is_active": {
+                    "type": "boolean"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "discount_value": {
+                    "type": "number"
+                  },
+                  "min_order_value": {
+                    "type": "number"
+                  },
+                  "max_discount": {
+                    "type": "number"
+                  },
+                  "usage_limit": {
+                    "type": "integer"
+                  },
+                  "valid_until": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Coupon updated"
+          }
+        }
       }
     },
-
     "/admin/users": {
       "get": {
-        "tags": ["Admin — Users"],
+        "tags": [
+          "Admin — Users"
+        ],
         "summary": "List all users — includes address fields and coin_balance",
         "parameters": [
-          { "in": "query", "name": "search",     "schema": { "type": "string" }, "description": "Search by name, email, or mobile" },
-          { "in": "query", "name": "is_blocked", "schema": { "type": "boolean" } },
-          { "in": "query", "name": "page",       "schema": { "type": "integer", "default": 1 } },
-          { "in": "query", "name": "limit",      "schema": { "type": "integer", "default": 20 } }
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Search by name, email, or mobile"
+          },
+          {
+            "in": "query",
+            "name": "is_blocked",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
         ],
-        "responses": { "200": { "description": "Paginated user list with coin_balance and address fields" } }
+        "responses": {
+          "200": {
+            "description": "Paginated user list with coin_balance and address fields"
+          }
+        }
       }
     },
     "/admin/users/{id}/block": {
       "put": {
-        "tags": ["Admin — Users"], "summary": "Block or unblock a user (super_admin / admin only)",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["is_blocked"],
-          "properties": { "is_blocked": { "type": "boolean" } }
-        }}}},
-        "responses": { "200": { "description": "User blocked/unblocked" } }
+        "tags": [
+          "Admin — Users"
+        ],
+        "summary": "Block or unblock a user (super_admin / admin only)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "is_blocked"
+                ],
+                "properties": {
+                  "is_blocked": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User blocked/unblocked"
+          }
+        }
       }
     },
-
     "/admin/notifications": {
       "get": {
-        "tags": ["Admin — Notifications"],
+        "tags": [
+          "Admin — Notifications"
+        ],
         "summary": "Get admin notifications — scoped to admin's location. Super-admin sees all.",
         "responses": {
           "200": {
             "description": "notifications array and unread_count",
-            "content": { "application/json": { "schema": {
-              "type": "object",
-              "properties": {
-                "notifications": { "type": "array", "items": { "$ref": "#/components/schemas/AdminNotification" } },
-                "unread_count":  { "type": "integer" }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notifications": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AdminNotification"
+                      }
+                    },
+                    "unread_count": {
+                      "type": "integer"
+                    }
+                  }
+                }
               }
-            }}}
+            }
           }
         }
       }
     },
     "/admin/notifications/read-all": {
       "put": {
-        "tags": ["Admin — Notifications"], "summary": "Mark all admin notifications as read",
-        "responses": { "200": { "description": "Marked" } }
+        "tags": [
+          "Admin — Notifications"
+        ],
+        "summary": "Mark all admin notifications as read",
+        "responses": {
+          "200": {
+            "description": "Marked"
+          }
+        }
       }
     },
     "/admin/notifications/{id}/read": {
       "put": {
-        "tags": ["Admin — Notifications"], "summary": "Mark a single admin notification as read",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "Marked" } }
+        "tags": [
+          "Admin — Notifications"
+        ],
+        "summary": "Mark a single admin notification as read",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Marked"
+          }
+        }
       }
     },
     "/admin/notifications/broadcast": {
       "post": {
-        "tags": ["Admin — Notifications"],
+        "tags": [
+          "Admin — Notifications"
+        ],
         "summary": "Send a notification to users — omit user_ids to broadcast to ALL active users",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["title", "message"],
-          "properties": {
-            "title":    { "type": "string",  "example": "Weekend Offer!" },
-            "message":  { "type": "string",  "example": "Get 20% off on all large pizzas this weekend." },
-            "type":     { "type": "string",  "enum": ["promo","system","order","refund"], "default": "promo" },
-            "user_ids": { "type": "array",   "items": { "type": "integer" }, "description": "Omit to broadcast to all active non-blocked users", "nullable": true }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title",
+                  "message"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "example": "Weekend Offer!"
+                  },
+                  "message": {
+                    "type": "string",
+                    "example": "Get 20% off on all large pizzas this weekend."
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "promo",
+                      "system",
+                      "order",
+                      "refund"
+                    ],
+                    "default": "promo"
+                  },
+                  "user_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "Omit to broadcast to all active non-blocked users",
+                    "nullable": true
+                  }
+                }
+              }
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "Notification sent. Returns sent_to count." } }
+        },
+        "responses": {
+          "200": {
+            "description": "Notification sent. Returns sent_to count."
+          }
+        }
       }
     },
-
     "/admin/refunds": {
       "get": {
-        "tags": ["Admin — Refunds"], "summary": "List all refund requests",
-        "parameters": [{ "in": "query", "name": "status", "schema": { "type": "string", "enum": ["pending","processing","completed","failed"] } }],
-        "responses": { "200": { "description": "Array of refunds with order_number, user info, coins_earned" } }
+        "tags": [
+          "Admin — Refunds"
+        ],
+        "summary": "List all refund requests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "processing",
+                "completed",
+                "failed"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of refunds with order_number, user info, coins_earned"
+          }
+        }
       }
     },
     "/admin/refunds/{id}/process": {
       "post": {
-        "tags": ["Admin — Refunds"],
+        "tags": [
+          "Admin — Refunds"
+        ],
         "summary": "Approve or reject a refund. On approval: coins_earned are reverted and user is notified.",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["action"],
-          "properties": {
-            "action": { "type": "string", "enum": ["approve", "reject"] },
-            "notes":  { "type": "string", "nullable": true }
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
           }
-        }}}},
-        "responses": { "200": { "description": "Refund processed. Coins auto-reverted on approval." } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "reject"
+                    ]
+                  },
+                  "notes": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Refund processed. Coins auto-reverted on approval."
+          }
+        }
       }
     },
-
     "/admin/support/tickets": {
       "get": {
-        "tags": ["Admin — Support"], "summary": "List all support tickets (filtered by admin location)",
-        "parameters": [
-          { "in": "query", "name": "status",   "schema": { "type": "string", "enum": ["open","in_progress","resolved","closed"] } },
-          { "in": "query", "name": "priority", "schema": { "type": "string", "enum": ["low","medium","high","urgent"] } }
+        "tags": [
+          "Admin — Support"
         ],
-        "responses": { "200": { "description": "Array of tickets" } }
+        "summary": "List all support tickets (filtered by admin location)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "in_progress",
+                "resolved",
+                "closed"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "urgent"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of tickets"
+          }
+        }
       }
     },
     "/admin/support/tickets/{id}/reply": {
       "post": {
-        "tags": ["Admin — Support"], "summary": "Reply to a support ticket",
-        "parameters": [{ "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": {
-          "type": "object", "required": ["message"],
-          "properties": { "message": { "type": "string" } }
-        }}}},
-        "responses": { "200": { "description": "Reply sent" } }
+        "tags": [
+          "Admin — Support"
+        ],
+        "summary": "Reply to a support ticket",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reply sent"
+          }
+        }
+      }
+    },
+    "/payments/create-order": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Initiate a PayU payment for a placed order",
+        "description": "Step 1 of payment flow. For online payments returns payu_params — POST these fields to https://test.payu.in/_payment (or https://secure.payu.in/_payment in production). For cash_on_delivery confirms order immediately, no further steps needed. surl and furl are both set to POST /api/payments/payu-webhook.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayUCreateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Online: {txnid, amount, currency, order_id, order_number, payu_params{key,txnid,amount,productinfo,firstname,email,phone,surl,furl,hash,udf1}}. COD: {payment_method:\"cash_on_delivery\", order_id}"
+          },
+          "404": {
+            "description": "Order not found or already paid"
+          }
+        }
+      }
+    },
+    "/payments/verify": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Verify PayU payment after redirect (client-side callback)",
+        "description": "Step 2 of online payment flow — call from your redirect handler. Accepts PayU field names (txnid, mihpayid, hash) or legacy Razorpay aliases (razorpay_order_id, razorpay_payment_id, razorpay_signature). On success marks payment captured and order confirmed.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayUVerifyBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payment verified. Returns {payment_id, order_id}"
+          },
+          "400": {
+            "description": "Hash mismatch — verification failed"
+          }
+        }
+      }
+    },
+    "/payments/payu-webhook": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "PayU server-to-server webhook (surl + furl)",
+        "description": "PayU posts to this URL for both success and failure. Configure as both surl and furl. Accepts application/x-www-form-urlencoded. Handles status: success | failure | failed | cancel | cancelled.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "example": "success"
+                  },
+                  "txnid": {
+                    "type": "string"
+                  },
+                  "amount": {
+                    "type": "string"
+                  },
+                  "productinfo": {
+                    "type": "string"
+                  },
+                  "firstname": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "udf1": {
+                    "type": "string",
+                    "description": "order_id"
+                  },
+                  "mihpayid": {
+                    "type": "string"
+                  },
+                  "hash": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/admin/menu/categories": {
+      "get": {
+        "tags": [
+          "Admin — Categories"
+        ],
+        "summary": "List all categories including inactive",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of Category objects. Each includes has_toppings and has_crust flags."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin — Categories"
+        ],
+        "summary": "Create a new category",
+        "description": "Set has_toppings=true so products in this category show a toppings selector (e.g. Pizzas). Set has_crust=true to show the crust selector.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Category created. Returns {category_id}"
+          }
+        }
+      }
+    },
+    "/admin/menu/categories/{id}": {
+      "put": {
+        "tags": [
+          "Admin — Categories"
+        ],
+        "summary": "Update category fields including has_toppings / has_crust",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Category updated"
+          }
+        }
+      }
+    },
+    "/admin/menu/categories/{id}/image": {
+      "post": {
+        "tags": [
+          "Admin — Categories"
+        ],
+        "summary": "Upload category image (JPEG/PNG/WebP, max 5 MB)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Returns {image_url}"
+          }
+        }
+      }
+    },
+    "/admin/menu/crusts": {
+      "get": {
+        "tags": [
+          "Admin — Crusts"
+        ],
+        "summary": "List all crust types including unavailable",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of CrustType objects"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin — Crusts"
+        ],
+        "summary": "Create a new crust type",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CrustBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Crust created. Returns {crust_id}"
+          }
+        }
+      }
+    },
+    "/admin/menu/crusts/{id}": {
+      "put": {
+        "tags": [
+          "Admin — Crusts"
+        ],
+        "summary": "Update a crust type",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CrustBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin — Crusts"
+        ],
+        "summary": "Disable a crust type (soft delete)",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Crust disabled"
+          }
+        }
+      }
+    },
+    "/admin/menu/products/{id}/sizes": {
+      "get": {
+        "tags": [
+          "Admin — Menu"
+        ],
+        "summary": "List all sizes for a product",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Product ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of ProductSize objects"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Admin — Menu"
+        ],
+        "summary": "Add a size to a product",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Product ID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductSizeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Size added. Returns {size_id}"
+          }
+        }
+      }
+    },
+    "/admin/menu/products/{id}/sizes/{sizeId}": {
+      "put": {
+        "tags": [
+          "Admin — Menu"
+        ],
+        "summary": "Update a product size",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Product ID"
+          },
+          {
+            "in": "path",
+            "name": "sizeId",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Size ID"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductSizeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Size updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin — Menu"
+        ],
+        "summary": "Delete a product size",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Product ID"
+          },
+          {
+            "in": "path",
+            "name": "sizeId",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Size ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Size deleted"
+          }
+        }
       }
     }
-
   }
 }

@@ -1,24 +1,25 @@
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
-const path = require('path');
-const fs = require('fs');
+const express    = require('express');
+const cors       = require('cors');
+const helmet     = require('helmet');
+const morgan     = require('morgan');
+const rateLimit  = require('express-rate-limit');
+const path       = require('path');
+const fs         = require('fs');
 
-const { getPool } = require('./config/db');
-const routes = require('./routes');
+const { getPool }   = require('./config/db');
+const routes        = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
-const logger = require('./utils/logger');
+const logger        = require('./utils/logger');
 const { setupSwagger } = require('./swagger');
-const app = express();
+
+const app  = express();
 setupSwagger(app);
 
 const PORT = process.env.PORT || 5000;
 
-// ─── ENSURE DIRS ─────────────────────────────────────────────────
-['uploads', 'uploads/products', 'logs'].forEach(dir => {
+// ─── ENSURE DIRS ──────────────────────────────────────────────────
+['uploads', 'uploads/products', 'uploads/categories', 'logs'].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -26,14 +27,14 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
-    ? ['http://13.232.73.121']
+    ? (process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['http://13.232.73.121'])
     : '*',
   credentials: true,
 }));
 
-// Rate limiter - global
+// Rate limiter — global
 app.use(rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
+  windowMs: 15 * 60 * 1000,
   max: 5000,
   message: { success: false, message: 'Too many requests. Please try again later.' },
 }));
@@ -46,9 +47,7 @@ const otpLimiter = rateLimit({
 });
 app.use('/api/auth/send-otp', otpLimiter);
 
-// Raw body for Razorpay webhook (must be before json parser)
-app.use('/api/payments/razorpay-webhook', express.raw({ type: 'application/json' }));
-
+// PayU webhook needs urlencoded body (handled in route), not raw
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan('combined', { stream: { write: msg => logger.info(msg.trim()) } }));
@@ -78,9 +77,10 @@ const start = async () => {
   try {
     await getPool();
     app.listen(PORT, () => {
-      logger.info(`🍕 GOBT Pizza Backend running on port ${PORT}`);
-      console.log(`🍕 Server: http://localhost:${PORT}`);
-      console.log(`📋 Health: http://localhost:${PORT}/health`);
+      logger.info(`🍕 PizzaHap Backend running on port ${PORT}`);
+      console.log(`🍕 Server:  http://localhost:${PORT}`);
+      console.log(`📋 Health:  http://localhost:${PORT}/health`);
+      console.log(`📖 API Docs: http://localhost:${PORT}/api-docs`);
     });
   } catch (err) {
     logger.error(`Failed to start server: ${err.message}`);
