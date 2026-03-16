@@ -217,23 +217,32 @@ const adminPlaceOrder = async (req, res, next) => {
     const orderItems = [];
 
     for (const item of items) {
-      // Add this before the query to debug
-      console.log('Checking product:', {
-        product_id: item.product_id,
-        size_id: item.size_id,
-        crust_id: item.crust_id
-      });
-
-      const productResult = await query(
-        `SELECT p.*, ps.price as size_price, ps.size_name,
-          ct.extra_price as crust_extra, ct.name as crust_name
-   FROM Products p
-   JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
-   LEFT JOIN CrustTypes ct ON ct.id = ?
-   WHERE p.id = ? AND p.is_available = 1`,
-        [item.size_id, item.crust_id || null, item.product_id]
-      );
-
+      let productResult;
+      
+      // Handle products with sizes vs without sizes
+      if (item.size_id) {
+        // Product has a size - use the size price
+        productResult = await query(
+          `SELECT p.*, ps.price as size_price, ps.size_name,
+                  ct.extra_price as crust_extra, ct.name as crust_name
+           FROM Products p
+           JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
+           LEFT JOIN CrustTypes ct ON ct.id = ?
+           WHERE p.id = ? AND p.is_available = 1`,
+          [item.size_id, item.crust_id || null, item.product_id]
+        );
+      } else {
+        // Product doesn't have sizes - use base_price
+        productResult = await query(
+          `SELECT p.*, p.base_price as size_price, NULL as size_name,
+                  ct.extra_price as crust_extra, ct.name as crust_name
+           FROM Products p
+           LEFT JOIN CrustTypes ct ON ct.id = ?
+           WHERE p.id = ? AND p.is_available = 1`,
+          [item.crust_id || null, item.product_id]
+        );
+      }
+      
       if (!productResult.length) {
         console.log('Product not found with params:', {
           size_id: item.size_id,
@@ -242,19 +251,32 @@ const adminPlaceOrder = async (req, res, next) => {
         });
         return badRequest(res, `Product ${item.product_id} not available`);
       }
+      
       const product = productResult[0];
 
       let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
       const itemToppings = [];
+      
       if (item.toppings?.length) {
         for (const tid of item.toppings) {
           const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-          if (tr.length) { itemPrice += parseFloat(tr[0].price); itemToppings.push(tr[0]); }
+          if (tr.length) { 
+            itemPrice += parseFloat(tr[0].price); 
+            itemToppings.push(tr[0]); 
+          }
         }
       }
+      
       const total_price = parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));
       subtotal += total_price;
-      orderItems.push({ ...item, product, unit_price: itemPrice, total_price, toppings: itemToppings });
+      
+      orderItems.push({ 
+        ...item, 
+        product, 
+        unit_price: itemPrice, 
+        total_price, 
+        toppings: itemToppings 
+      });
     }
 
     subtotal = parseFloat(subtotal.toFixed(2));
@@ -272,8 +294,8 @@ const adminPlaceOrder = async (req, res, next) => {
            tax_amount, total_amount, special_instructions, payment_status, payment_method)
          VALUES (?,?,?,?,?,?,0,?,0,?,?,'pending',?)`,
         [order_number, user_id || null, resolvedLocationId, delivery_type,
-          delivery_address || null, subtotal, delivery_fee, total_amount,
-          special_instructions || null, payment_method]
+         delivery_address || null, subtotal, delivery_fee, total_amount,
+         special_instructions || null, payment_method]
       );
       const newOrderId = orderResult.insertId;
 
@@ -283,10 +305,12 @@ const adminPlaceOrder = async (req, res, next) => {
             (order_id, product_id, product_name, size_id, size_name,
              crust_id, crust_name, quantity, unit_price, total_price)
            VALUES (?,?,?,?,?,?,?,?,?,?)`,
-          [newOrderId, item.product_id, item.product.name, item.size_id,
-            item.product.size_name, item.crust_id || null, item.product.crust_name || null,
-            item.quantity || 1, parseFloat(item.unit_price).toFixed(2), item.total_price]
+          [newOrderId, item.product_id, item.product.name, item.size_id || null,
+           item.product.size_name || 'Regular', item.crust_id || null, 
+           item.product.crust_name || null, item.quantity || 1, 
+           parseFloat(item.unit_price).toFixed(2), item.total_price]
         );
+        
         for (const topping of item.toppings) {
           await conn.execute(
             `INSERT INTO OrderItemToppings (order_item_id, topping_id, topping_name, price) VALUES (?,?,?,?)`,
@@ -332,7 +356,10 @@ const adminPlaceOrder = async (req, res, next) => {
     }
 
     return created(res, { order_id: orderId, order_number, total_amount, payment_method }, 'In-house order created');
-  } catch (err) { next(err); }
+  } catch (err) { 
+    console.error('Order placement error:', err);
+    next(err); 
+  }
 };
 
 // ── Users ─────────────────────────────────────────────────────────
