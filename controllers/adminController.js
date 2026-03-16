@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
-const jwt    = require('jsonwebtoken');
-const path   = require('path');
-const fs     = require('fs');
+const jwt = require('jsonwebtoken');
+const path = require('path');
+const fs = require('fs');
 const { query, transaction } = require('../config/db');
 const { success, created, badRequest, notFound, paginated, unauthorized } = require('../utils/response');
 const { notifyUser, notifyAdmins, creditCoins, revertCoins } = require('../services/notificationService');
@@ -35,7 +35,7 @@ const adminLogin = async (req, res, next) => {
 const getDashboard = async (req, res, next) => {
   try {
     const lid = req.admin.location_id;
-    const lf  = lid ? ` AND location_id = ${parseInt(lid)}` : '';
+    const lf = lid ? ` AND location_id = ${parseInt(lid)}` : '';
     const olF = lid ? ` AND o.location_id = ${parseInt(lid)}` : '';
     const [todayOrders, totalRevenue, newUsers, pendingOrders, popularProducts] = await Promise.all([
       query(`SELECT COUNT(*) as count, IFNULL(SUM(total_amount),0) as revenue FROM Orders WHERE DATE(created_at) = CURDATE() AND payment_status = 'paid'${lf}`),
@@ -59,11 +59,11 @@ const getReports = async (req, res, next) => {
   try {
     const { period = 'daily' } = req.query;
     const lid = req.admin.location_id;
-    const lf  = lid ? ` AND location_id = ${parseInt(lid)}` : '';
+    const lf = lid ? ` AND location_id = ${parseInt(lid)}` : '';
     let groupBy;
-    if (period === 'daily')        groupBy = `DATE(created_at)`;
-    else if (period === 'weekly')  groupBy = `YEAR(created_at), WEEK(created_at)`;
-    else                           groupBy = `DATE_FORMAT(created_at,'%Y-%m')`;
+    if (period === 'daily') groupBy = `DATE(created_at)`;
+    else if (period === 'weekly') groupBy = `YEAR(created_at), WEEK(created_at)`;
+    else groupBy = `DATE_FORMAT(created_at,'%Y-%m')`;
     const rows = await query(
       `SELECT ${groupBy} as period, COUNT(*) as total_orders, IFNULL(SUM(total_amount),0) as revenue,
               COUNT(CASE WHEN status='delivered' THEN 1 END) as delivered,
@@ -79,15 +79,15 @@ const getReports = async (req, res, next) => {
 const adminGetOrders = async (req, res, next) => {
   try {
     const { status, payment_status } = req.query;
-    const page   = Math.max(1, parseInt(req.query.page) || 1);
-    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
-    const lid    = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
     let where = 'WHERE 1=1';
     const params = [];
-    if (status)         { where += ' AND o.status = ?';         params.push(status); }
+    if (status) { where += ' AND o.status = ?'; params.push(status); }
     if (payment_status) { where += ' AND o.payment_status = ?'; params.push(payment_status); }
-    if (lid)            { where += ' AND o.location_id = ?';    params.push(lid); }
+    if (lid) { where += ' AND o.location_id = ?'; params.push(lid); }
     const [countRes, rows] = await Promise.all([
       query(`SELECT COUNT(*) as total FROM Orders o ${where}`, params),
       query(
@@ -137,14 +137,14 @@ const updateOrderStatus = async (req, res, next) => {
   try {
     const { status, note } = req.body;
     const transitions = {
-      pending:          ['confirmed', 'cancelled'],
-      confirmed:        ['preparing', 'cancelled'],
-      preparing:        ['out_for_delivery', 'cancelled'],
+      pending: ['confirmed', 'cancelled'],
+      confirmed: ['preparing', 'cancelled'],
+      preparing: ['out_for_delivery', 'cancelled'],
       out_for_delivery: ['delivered'],
-      delivered:        ['refund_requested'],
-      cancelled:        [],
+      delivered: ['refund_requested'],
+      cancelled: [],
       refund_requested: ['refunded'],
-      refunded:         [],
+      refunded: [],
     };
     const [orderRow] = await query(`SELECT * FROM Orders WHERE id = ?`, [req.params.id]);
     if (!orderRow) return notFound(res, 'Order not found');
@@ -158,14 +158,14 @@ const updateOrderStatus = async (req, res, next) => {
     );
 
     const statusMessages = {
-      confirmed:        'Your order has been confirmed and will be prepared shortly.',
-      preparing:        'Your order is being prepared!',
+      confirmed: 'Your order has been confirmed and will be prepared shortly.',
+      preparing: 'Your order is being prepared!',
       out_for_delivery: 'Your order is on the way!',
-      delivered:        'Your order has been delivered. Enjoy!',
-      cancelled:        'Your order has been cancelled.',
+      delivered: 'Your order has been delivered. Enjoy!',
+      cancelled: 'Your order has been cancelled.',
     };
     if (orderRow.user_id && statusMessages[status]) {
-      await notifyUser(orderRow.user_id, `Order ${status.replace(/_/g,' ')}`, statusMessages[status], 'order',
+      await notifyUser(orderRow.user_id, `Order ${status.replace(/_/g, ' ')}`, statusMessages[status], 'order',
         { order_id: orderRow.id, order_number: orderRow.order_number, status });
     }
 
@@ -217,16 +217,31 @@ const adminPlaceOrder = async (req, res, next) => {
     const orderItems = [];
 
     for (const item of items) {
+      // Add this before the query to debug
+      console.log('Checking product:', {
+        product_id: item.product_id,
+        size_id: item.size_id,
+        crust_id: item.crust_id
+      });
+
       const productResult = await query(
         `SELECT p.*, ps.price as size_price, ps.size_name,
-                ct.extra_price as crust_extra, ct.name as crust_name
-         FROM Products p
-         JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
-         LEFT JOIN CrustTypes ct ON ct.id = ?
-         WHERE p.id = ? AND p.is_available = 1`,
+          ct.extra_price as crust_extra, ct.name as crust_name
+   FROM Products p
+   JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
+   LEFT JOIN CrustTypes ct ON ct.id = ?
+   WHERE p.id = ? AND p.is_available = 1`,
         [item.size_id, item.crust_id || null, item.product_id]
       );
-      if (!productResult.length) return badRequest(res, `Product ${item.product_id} not available`);
+
+      if (!productResult.length) {
+        console.log('Product not found with params:', {
+          size_id: item.size_id,
+          crust_id: item.crust_id,
+          product_id: item.product_id
+        });
+        return badRequest(res, `Product ${item.product_id} not available`);
+      }
       const product = productResult[0];
 
       let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
@@ -257,8 +272,8 @@ const adminPlaceOrder = async (req, res, next) => {
            tax_amount, total_amount, special_instructions, payment_status, payment_method)
          VALUES (?,?,?,?,?,?,0,?,0,?,?,'pending',?)`,
         [order_number, user_id || null, resolvedLocationId, delivery_type,
-         delivery_address || null, subtotal, delivery_fee, total_amount,
-         special_instructions || null, payment_method]
+          delivery_address || null, subtotal, delivery_fee, total_amount,
+          special_instructions || null, payment_method]
       );
       const newOrderId = orderResult.insertId;
 
@@ -269,8 +284,8 @@ const adminPlaceOrder = async (req, res, next) => {
              crust_id, crust_name, quantity, unit_price, total_price)
            VALUES (?,?,?,?,?,?,?,?,?,?)`,
           [newOrderId, item.product_id, item.product.name, item.size_id,
-           item.product.size_name, item.crust_id || null, item.product.crust_name || null,
-           item.quantity || 1, parseFloat(item.unit_price).toFixed(2), item.total_price]
+            item.product.size_name, item.crust_id || null, item.product.crust_name || null,
+            item.quantity || 1, parseFloat(item.unit_price).toFixed(2), item.total_price]
         );
         for (const topping of item.toppings) {
           await conn.execute(
@@ -324,12 +339,12 @@ const adminPlaceOrder = async (req, res, next) => {
 const adminGetUsers = async (req, res, next) => {
   try {
     const { search, is_blocked } = req.query;
-    const page   = Math.max(1, parseInt(req.query.page) || 1);
-    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
     let where = 'WHERE 1=1';
     const params = [];
-    if (search)      { where += ` AND (name LIKE ? OR email LIKE ? OR mobile LIKE ?)`; params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
+    if (search) { where += ` AND (name LIKE ? OR email LIKE ? OR mobile LIKE ?)`; params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
     if (is_blocked !== undefined) { where += ` AND is_blocked = ?`; params.push(is_blocked === 'true' ? 1 : 0); }
     const [countRes, rows] = await Promise.all([
       query(`SELECT COUNT(*) as total FROM Users ${where}`, params),
@@ -389,8 +404,8 @@ const updateCategory = async (req, res, next) => {
         name || null, description || null,
         sort_order != null ? sort_order : null,
         has_toppings != null ? (has_toppings ? 1 : 0) : null,
-        has_crust    != null ? (has_crust    ? 1 : 0) : null,
-        is_active    != null ? (is_active    ? 1 : 0) : null,
+        has_crust != null ? (has_crust ? 1 : 0) : null,
+        is_active != null ? (is_active ? 1 : 0) : null,
         req.params.id,
       ]
     );
@@ -412,18 +427,18 @@ const uploadCategoryImage = async (req, res, next) => {
 const adminGetProducts = async (req, res, next) => {
   try {
     const { search, category_id, show_unavailable } = req.query;
-    const page   = Math.max(1, parseInt(req.query.page) || 1);
-    const limit  = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
     const offset = (page - 1) * limit;
-    const lid    = req.admin.location_id;
+    const lid = req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
     if (show_unavailable !== 'true') { where += ` AND p.is_available = 1`; }
     if (category_id) { where += ` AND p.category_id = ?`; params.push(parseInt(category_id)); }
-    if (search)      { where += ` AND (p.name LIKE ? OR p.description LIKE ?)`; params.push(`%${search}%`, `%${search}%`); }
+    if (search) { where += ` AND (p.name LIKE ? OR p.description LIKE ?)`; params.push(`%${search}%`, `%${search}%`); }
     let locSelect = '', locJoin = '';
     if (lid) {
-      locJoin   = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${parseInt(lid)}`;
+      locJoin = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${parseInt(lid)}`;
       locSelect = `, COALESCE(pla.is_available, 1) as location_available`;
     }
     const [countRes, rows] = await Promise.all([
@@ -454,7 +469,7 @@ const createProduct = async (req, res, next) => {
     if (sizes?.length) {
       for (const sz of sizes) {
         await query(`INSERT INTO ProductSizes (product_id, size_name, size_code, price) VALUES (?,?,?,?)`,
-          [productId, sz.size_name, sz.size_code || sz.size_name.slice(0,3).toUpperCase(), parseFloat(sz.price)]);
+          [productId, sz.size_name, sz.size_code || sz.size_name.slice(0, 3).toUpperCase(), parseFloat(sz.price)]);
       }
     } else {
       await query(`INSERT INTO ProductSizes (product_id, size_name, size_code, price) VALUES (?,?,?,?)`,
@@ -481,9 +496,9 @@ const updateProduct = async (req, res, next) => {
       [
         name || null, description || null,
         base_price != null ? parseFloat(base_price) : null,
-        is_veg      != null ? (is_veg      ? 1 : 0) : null,
+        is_veg != null ? (is_veg ? 1 : 0) : null,
         is_featured != null ? (is_featured ? 1 : 0) : null,
-        is_available!= null ? (is_available? 1 : 0) : null,
+        is_available != null ? (is_available ? 1 : 0) : null,
         category_id != null ? parseInt(category_id) : null,
         req.params.id,
       ]
@@ -506,7 +521,7 @@ const uploadProductImage = async (req, res, next) => {
     if (!product) return notFound(res, 'Product not found');
     if (product.image_url) {
       const oldPath = path.join(__dirname, '..', product.image_url.replace(/^\//, ''));
-      if (fs.existsSync(oldPath)) { try { fs.unlinkSync(oldPath); } catch (_) {} }
+      if (fs.existsSync(oldPath)) { try { fs.unlinkSync(oldPath); } catch (_) { } }
     }
     const imageUrl = `/uploads/products/${req.file.filename}`;
     await query(`UPDATE Products SET image_url = ?, updated_at = NOW() WHERE id = ?`, [imageUrl, req.params.id]);
@@ -518,7 +533,7 @@ const uploadProductImage = async (req, res, next) => {
 const setProductLocationAvailability = async (req, res, next) => {
   try {
     const { is_available, location_id: bodyLocId } = req.body;
-    const productId  = parseInt(req.params.id);
+    const productId = parseInt(req.params.id);
     const locationId = req.admin.location_id || (bodyLocId ? parseInt(bodyLocId) : null);
     if (!locationId) return badRequest(res, 'location_id is required');
     await query(
@@ -534,9 +549,9 @@ const getProductAvailabilityMatrix = async (req, res, next) => {
   try {
     const productId = parseInt(req.params.id);
     const locations = await query(`SELECT id, name FROM Locations WHERE is_active = 1 ORDER BY name`);
-    const avails    = await query(`SELECT location_id, is_available FROM ProductLocationAvailability WHERE product_id = ?`, [productId]);
-    const map       = Object.fromEntries(avails.map(r => [r.location_id, r.is_available]));
-    const matrix    = locations.map(loc => ({
+    const avails = await query(`SELECT location_id, is_available FROM ProductLocationAvailability WHERE product_id = ?`, [productId]);
+    const map = Object.fromEntries(avails.map(r => [r.location_id, r.is_available]));
+    const matrix = locations.map(loc => ({
       location_id: loc.id, location_name: loc.name,
       is_available: map[loc.id] !== undefined ? map[loc.id] === 1 : true,
     }));
@@ -557,7 +572,7 @@ const createProductSize = async (req, res, next) => {
     const { size_name, size_code, price } = req.body;
     const r = await query(
       `INSERT INTO ProductSizes (product_id, size_name, size_code, price) VALUES (?,?,?,?)`,
-      [req.params.id, size_name, size_code || size_name.slice(0,3).toUpperCase(), parseFloat(price)]
+      [req.params.id, size_name, size_code || size_name.slice(0, 3).toUpperCase(), parseFloat(price)]
     );
     return created(res, { size_id: r.insertId }, 'Size added');
   } catch (err) { next(err); }
@@ -623,10 +638,10 @@ const updateTopping = async (req, res, next) => {
        WHERE id = ?`,
       [
         name || null,
-        price        != null ? parseFloat(price)  : null,
-        is_veg       != null ? (is_veg       ? 1 : 0) : null,
+        price != null ? parseFloat(price) : null,
+        is_veg != null ? (is_veg ? 1 : 0) : null,
         is_available != null ? (is_available ? 1 : 0) : null,
-        sort_order   != null ? sort_order   : null,
+        sort_order != null ? sort_order : null,
         req.params.id,
       ]
     );
@@ -672,9 +687,9 @@ const updateCrust = async (req, res, next) => {
        WHERE id = ?`,
       [
         name || null,
-        extra_price  != null ? parseFloat(extra_price) : null,
-        is_available != null ? (is_available ? 1 : 0)  : null,
-        sort_order   != null ? sort_order               : null,
+        extra_price != null ? parseFloat(extra_price) : null,
+        is_available != null ? (is_available ? 1 : 0) : null,
+        sort_order != null ? sort_order : null,
         req.params.id,
       ]
     );
@@ -704,7 +719,7 @@ const createLocation = async (req, res, next) => {
       `INSERT INTO Locations (name, address, city, latitude, longitude, phone, email, opening_time, closing_time)
        VALUES (?,?,?,?,?,?,?,?,?)`,
       [name, address, city || '', latitude, longitude, phone || null, email || null,
-       opening_time || '09:00:00', closing_time || '23:00:00']
+        opening_time || '09:00:00', closing_time || '23:00:00']
     );
     return created(res, { location_id: r.insertId }, 'Location created');
   } catch (err) { next(err); }
@@ -722,9 +737,9 @@ const updateLocation = async (req, res, next) => {
          is_active    = IFNULL(?,is_active),
          opening_time = IFNULL(?,opening_time), closing_time = IFNULL(?,closing_time)
        WHERE id = ?`,
-      [name||null, address||null, city||null, latitude||null, longitude||null,
-       phone||null, email||null, is_active!=null?(is_active?1:0):null,
-       opening_time||null, closing_time||null, req.params.id]
+      [name || null, address || null, city || null, latitude || null, longitude || null,
+      phone || null, email || null, is_active != null ? (is_active ? 1 : 0) : null,
+      opening_time || null, closing_time || null, req.params.id]
     );
     return success(res, {}, 'Location updated');
   } catch (err) { next(err); }
@@ -745,8 +760,8 @@ const createCoupon = async (req, res, next) => {
       `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
       [code.toUpperCase(), description, discount_type, discount_value,
-       min_order_value || 0, max_discount || null, usage_limit || null,
-       per_user_limit || 1, new Date(valid_from), new Date(valid_until)]
+      min_order_value || 0, max_discount || null, usage_limit || null,
+      per_user_limit || 1, new Date(valid_from), new Date(valid_until)]
     );
     return created(res, {}, 'Coupon created');
   } catch (err) { next(err); }
@@ -766,8 +781,8 @@ const updateCoupon = async (req, res, next) => {
          valid_until     = IFNULL(?,valid_until)
        WHERE id = ?`,
       [
-        is_active     != null ? (is_active ? 1 : 0) : null,
-        description   || null, discount_value || null,
+        is_active != null ? (is_active ? 1 : 0) : null,
+        description || null, discount_value || null,
         min_order_value || null, max_discount || null, usage_limit || null,
         valid_until ? new Date(valid_until) : null,
         req.params.id,
