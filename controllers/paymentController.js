@@ -23,12 +23,18 @@ const generatePayUHash = ({ txnid, amount, productinfo, firstname, email, udf1 =
 };
 
 /*  PayU reverse hash (response verification):
-    salt|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key  */
+    SHA512(salt|status|additional_charges|udf9|udf8|udf7|udf6|udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key)
+    Fields 3-7 (additional_charges + udf9..udf6) are empty in standard integration.
+    Fields 8-11 (udf5..udf2) are also empty since we only use udf1.  */
 const verifyPayUHash = ({ status, txnid, amount, productinfo, firstname, email, udf1 = '', hash }) => {
   const reverseStr = [
     process.env.PAYU_SALT,
     status,
-    '', '', '', '', '',        // udf5..udf2 (empty)
+    '', '', '', '', '',        // additional_charges, udf9, udf8, udf7, udf6 (all empty)
+    '',                        // udf5 (empty)
+    '',                        // udf4 (empty)
+    '',                        // udf3 (empty)
+    '',                        // udf2 (empty)
     udf1,                      // udf1
     email, firstname,
     productinfo, amount, txnid,

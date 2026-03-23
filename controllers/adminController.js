@@ -205,7 +205,8 @@ const updatePaymentStatus = async (req, res, next) => {
 const adminPlaceOrder = async (req, res, next) => {
   try {
     const {
-      user_id, items, location_id, delivery_type = 'pickup',
+      user_id, customer_name, customer_phone,
+      items, location_id, delivery_type = 'pickup',
       delivery_address, special_instructions,
       payment_method = 'cash_on_delivery',
     } = req.body;
@@ -291,11 +292,13 @@ const adminPlaceOrder = async (req, res, next) => {
         `INSERT INTO Orders
           (order_number, user_id, location_id, delivery_type,
            delivery_address, subtotal, discount_amount, delivery_fee,
-           tax_amount, total_amount, special_instructions, payment_status, payment_method)
-         VALUES (?,?,?,?,?,?,0,?,0,?,?,'pending',?)`,
+           tax_amount, total_amount, special_instructions, payment_status, payment_method,
+           customer_name, customer_phone)
+         VALUES (?,?,?,?,?,?,0,?,0,?,?,'pending',?,?,?)`,
         [order_number, user_id || null, resolvedLocationId, delivery_type,
          delivery_address || null, subtotal, delivery_fee, total_amount,
-         special_instructions || null, payment_method]
+         special_instructions || null, payment_method,
+         customer_name || null, customer_phone || null]
       );
       const newOrderId = orderResult.insertId;
 
@@ -772,6 +775,88 @@ const updateLocation = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Delivery Riders CRUD ──────────────────────────────────────────
+const getDeliveryRiders = async (req, res, next) => {
+  try {
+    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    let where = 'WHERE 1=1';
+    const params = [];
+    if (lid) { where += ' AND location_id = ?'; params.push(lid); }
+    const rows = await query(
+      `SELECT dr.*, l.name as location_name FROM DeliveryRiders dr LEFT JOIN Locations l ON dr.location_id = l.id ${where} ORDER BY dr.name ASC`,
+      params
+    );
+    return success(res, rows);
+  } catch (err) { next(err); }
+};
+
+const createDeliveryRider = async (req, res, next) => {
+  try {
+    const { name, phone, location_id } = req.body;
+    const resolvedLocationId = req.admin.location_id || (location_id ? parseInt(location_id) : null);
+    await query(
+      `INSERT INTO DeliveryRiders (name, phone, location_id) VALUES (?,?,?)`,
+      [name.trim(), phone.trim(), resolvedLocationId]
+    );
+    return created(res, {}, 'Delivery rider added');
+  } catch (err) { next(err); }
+};
+
+const updateDeliveryRider = async (req, res, next) => {
+  try {
+    const { name, phone, is_active, location_id } = req.body;
+    await query(
+      `UPDATE DeliveryRiders SET
+         name        = IFNULL(?,name),
+         phone       = IFNULL(?,phone),
+         is_active   = IFNULL(?,is_active),
+         location_id = IFNULL(?,location_id),
+         updated_at  = NOW()
+       WHERE id = ?`,
+      [name || null, phone || null,
+       is_active != null ? (is_active ? 1 : 0) : null,
+       location_id ? parseInt(location_id) : null,
+       req.params.id]
+    );
+    return success(res, {}, 'Delivery rider updated');
+  } catch (err) { next(err); }
+};
+
+const deleteDeliveryRider = async (req, res, next) => {
+  try {
+    await query(`UPDATE DeliveryRiders SET is_active = 0 WHERE id = ?`, [req.params.id]);
+    return success(res, {}, 'Delivery rider deactivated');
+  } catch (err) { next(err); }
+};
+
+const assignRiderToOrder = async (req, res, next) => {
+  try {
+    const { rider_id } = req.body;
+    const orderId = req.params.id;
+
+    if (rider_id) {
+      const riderRows = await query(`SELECT * FROM DeliveryRiders WHERE id = ? AND is_active = 1`, [rider_id]);
+      if (!riderRows.length) return notFound(res, 'Rider not found or inactive');
+    }
+
+    await query(
+      `UPDATE Orders SET rider_id = ?, updated_at = NOW() WHERE id = ?`,
+      [rider_id || null, orderId]
+    );
+
+    if (rider_id) {
+      const riderRows = await query(`SELECT name FROM DeliveryRiders WHERE id = ?`, [rider_id]);
+      await query(
+        `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
+         SELECT ?, status, CONCAT('Rider assigned: ', ?), ?, 'admin' FROM Orders WHERE id = ?`,
+        [orderId, riderRows[0].name, req.admin.id, orderId]
+      );
+    }
+
+    return success(res, {}, rider_id ? 'Rider assigned to order' : 'Rider unassigned from order');
+  } catch (err) { next(err); }
+};
+
 // ── Coupons CRUD ──────────────────────────────────────────────────
 const adminGetCoupons = async (req, res, next) => {
   try {
@@ -783,10 +868,12 @@ const adminGetCoupons = async (req, res, next) => {
 const createCoupon = async (req, res, next) => {
   try {
     const { code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until } = req.body;
+    // buy_1_get_1 coupons don't need a discount_value (stored as 0)
+    const resolvedDiscountValue = discount_type === 'buy_1_get_1' ? 0 : (discount_value || 0);
     await query(
       `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [code.toUpperCase(), description, discount_type, discount_value,
+      [code.toUpperCase(), description, discount_type, resolvedDiscountValue,
       min_order_value || 0, max_discount || null, usage_limit || null,
       per_user_limit || 1, new Date(valid_from), new Date(valid_until)]
     );
@@ -880,6 +967,7 @@ module.exports = {
   adminGetToppings, createTopping, updateTopping, deleteTopping,
   adminGetCrusts, createCrust, updateCrust, deleteCrust,
   adminGetLocations, createLocation, updateLocation,
+  getDeliveryRiders, createDeliveryRider, updateDeliveryRider, deleteDeliveryRider, assignRiderToOrder,
   adminGetCoupons, createCoupon, updateCoupon,
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
   sendNotificationToUsers,

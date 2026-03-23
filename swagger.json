@@ -2,8 +2,8 @@
   "openapi": "3.0.0",
   "info": {
     "title": "PizzaHap API",
-    "version": "4.0.0",
-    "description": "PizzaHap pizza ordering platform API. v4: no tax system (total = subtotal - discount + delivery_fee), categories carry has_toppings/has_crust flags, full PayU payment + refund flow, admin manages categories/crusts/product-sizes, in-house orders auto-confirm and auto-mark COD paid."
+    "version": "5.0.0",
+    "description": "PizzaHap pizza ordering platform API. v5: delivery riders management + rider assignment to orders, in-house billing accepts customer_name/customer_phone for walk-ins, buy_1_get_1 coupon type (discount = cheapest item price), fixed PayU reverse-hash verification."
   },
   "servers": [
     {
@@ -204,6 +204,18 @@
             "nullable": true,
             "description": "Omit for walk-in customer"
           },
+          "customer_name": {
+            "type": "string",
+            "nullable": true,
+            "example": "Rahul Sharma",
+            "description": "Walk-in customer name (used when user_id is omitted)"
+          },
+          "customer_phone": {
+            "type": "string",
+            "nullable": true,
+            "example": "9876543210",
+            "description": "Walk-in customer phone (used when user_id is omitted)"
+          },
           "items": {
             "type": "array",
             "items": {
@@ -307,6 +319,19 @@
           }
         }
       },
+      "DeliveryRider": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string", "example": "Amit Kumar" },
+          "phone": { "type": "string", "example": "9876543210" },
+          "location_id": { "type": "integer", "nullable": true },
+          "location_name": { "type": "string", "nullable": true },
+          "is_active": { "type": "boolean" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
       "Coupon": {
         "type": "object",
         "properties": {
@@ -324,8 +349,10 @@
             "type": "string",
             "enum": [
               "percentage",
-              "flat"
-            ]
+              "flat",
+              "buy_1_get_1"
+            ],
+            "description": "buy_1_get_1: discount equals the price of the cheapest item in the cart; discount_value is 0 and ignored"
           },
           "discount_value": {
             "type": "number"
@@ -2862,6 +2889,132 @@
         }
       }
     },
+    "/admin/riders": {
+      "get": {
+        "tags": ["Admin — Riders"],
+        "summary": "List delivery riders (filtered to admin's location if location-scoped)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "location_id",
+            "schema": { "type": "integer" },
+            "description": "super_admin only — filter by branch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of DeliveryRider objects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/DeliveryRider" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Admin — Riders"],
+        "summary": "Add a new delivery rider",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "phone"],
+                "properties": {
+                  "name": { "type": "string", "example": "Amit Kumar" },
+                  "phone": { "type": "string", "example": "9876543210" },
+                  "location_id": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "Auto-set from admin token if location-scoped"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Delivery rider added" }
+        }
+      }
+    },
+    "/admin/riders/{id}": {
+      "put": {
+        "tags": ["Admin — Riders"],
+        "summary": "Update rider details or toggle active status",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "phone": { "type": "string" },
+                  "is_active": { "type": "boolean" },
+                  "location_id": { "type": "integer", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Delivery rider updated" }
+        }
+      },
+      "delete": {
+        "tags": ["Admin — Riders"],
+        "summary": "Deactivate a delivery rider (soft delete — sets is_active = 0)",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Delivery rider deactivated" }
+        }
+      }
+    },
+    "/admin/orders/{id}/rider": {
+      "put": {
+        "tags": ["Admin — Orders"],
+        "summary": "Assign or unassign a delivery rider to an order",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rider_id": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "Pass null to unassign the current rider"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Rider assigned or unassigned. Adds a note to OrderStatusHistory." },
+          "404": { "description": "Rider not found or inactive" }
+        }
+      }
+    },
     "/admin/coupons": {
       "get": {
         "tags": [
@@ -2888,7 +3041,6 @@
                 "required": [
                   "code",
                   "discount_type",
-                  "discount_value",
                   "valid_from",
                   "valid_until"
                 ],
@@ -2905,12 +3057,15 @@
                     "type": "string",
                     "enum": [
                       "percentage",
-                      "flat"
-                    ]
+                      "flat",
+                      "buy_1_get_1"
+                    ],
+                    "description": "For buy_1_get_1, discount_value is not required (stored as 0). Discount at order time = price of cheapest item in cart."
                   },
                   "discount_value": {
                     "type": "number",
-                    "example": 20
+                    "example": 20,
+                    "description": "Required for percentage and flat types. Omit or set to 0 for buy_1_get_1."
                   },
                   "min_order_value": {
                     "type": "number",

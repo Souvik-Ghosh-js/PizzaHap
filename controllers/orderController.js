@@ -44,6 +44,7 @@ const calculateOrder = async (req, res, next) => {
     const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
     let discount_amount = 0, coupon = null;
 
+    const itemPrices = [];
     if (coupon_code) {
       const couponResult = await query(
         `SELECT * FROM Coupons WHERE code = ? AND is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW() AND (usage_limit IS NULL OR used_count < usage_limit)`,
@@ -52,10 +53,19 @@ const calculateOrder = async (req, res, next) => {
       if (!couponResult.length) return badRequest(res, 'Invalid or expired coupon');
       coupon = couponResult[0];
       if (subtotal < coupon.min_order_value) return badRequest(res, `Min order Rs.${coupon.min_order_value} required`);
-      discount_amount = coupon.discount_type === 'percentage'
-        ? Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity)
-        : coupon.discount_value;
-      discount_amount = parseFloat(discount_amount.toFixed(2));
+      if (coupon.discount_type === 'buy_1_get_1') {
+        // Build per-item prices to find cheapest (the free item)
+        for (const item of items) {
+          const p = await buildItemPrice(item);
+          itemPrices.push(p);
+        }
+        discount_amount = itemPrices.length ? parseFloat(Math.min(...itemPrices).toFixed(2)) : 0;
+      } else if (coupon.discount_type === 'percentage') {
+        discount_amount = Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity);
+        discount_amount = parseFloat(discount_amount.toFixed(2));
+      } else {
+        discount_amount = parseFloat(parseFloat(coupon.discount_value).toFixed(2));
+      }
     }
 
     let coins_discount = 0, available_coins = 0;
@@ -135,10 +145,19 @@ const placeOrder = async (req, res, next) => {
       if (!couponResult.length) return badRequest(res, 'Invalid coupon');
       const coupon = couponResult[0];
       if (subtotal < coupon.min_order_value) return badRequest(res, `Min order Rs.${coupon.min_order_value} required`);
-      discount_amount = coupon.discount_type === 'percentage'
-        ? Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity)
-        : coupon.discount_value;
-      discount_amount = parseFloat(discount_amount.toFixed(2));
+      if (coupon.discount_type === 'buy_1_get_1') {
+        const itemPrices = [];
+        for (const item of items) {
+          const p = await buildItemPrice(item);
+          itemPrices.push(p);
+        }
+        discount_amount = itemPrices.length ? parseFloat(Math.min(...itemPrices).toFixed(2)) : 0;
+      } else if (coupon.discount_type === 'percentage') {
+        discount_amount = Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity);
+        discount_amount = parseFloat(discount_amount.toFixed(2));
+      } else {
+        discount_amount = parseFloat(parseFloat(coupon.discount_value).toFixed(2));
+      }
       couponId = coupon.id;
     }
 

@@ -83,13 +83,18 @@ const validateCoupon = async (req, res, next) => {
         return badRequest(res, 'You have already used this coupon');
       }
     }
-    let discount = coupon.discount_type === 'percentage'
-      ? Math.min((order_value * coupon.discount_value) / 100, coupon.max_discount || Infinity)
-      : coupon.discount_value;
+    let discount = 0;
+    if (coupon.discount_type === 'percentage') {
+      discount = Math.min((order_value * coupon.discount_value) / 100, coupon.max_discount || Infinity);
+    } else if (coupon.discount_type === 'flat') {
+      discount = coupon.discount_value;
+    }
+    // buy_1_get_1: calculated_discount = 0 here; actual discount computed at order time based on cheapest item
     return success(res, {
       coupon_id: coupon.id, code: coupon.code,
       discount_type: coupon.discount_type, discount_value: coupon.discount_value,
       calculated_discount: parseFloat(discount.toFixed(2)), description: coupon.description,
+      is_bogo: coupon.discount_type === 'buy_1_get_1',
     });
   } catch (err) { next(err); }
 };

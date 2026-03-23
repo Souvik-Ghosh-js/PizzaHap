@@ -14,6 +14,7 @@ const {
   adminGetToppings, createTopping, updateTopping, deleteTopping,
   adminGetCrusts, createCrust, updateCrust, deleteCrust,
   adminGetLocations, createLocation, updateLocation,
+  getDeliveryRiders, createDeliveryRider, updateDeliveryRider, deleteDeliveryRider, assignRiderToOrder,
   adminGetCoupons, createCoupon, updateCoupon,
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
   sendNotificationToUsers,
@@ -66,7 +67,14 @@ router.get('/orders/:id/invoice', generateInvoice);
 // In-house billing
 router.post('/orders/inhouse', requireRole('super_admin', 'admin'), [
   body('items').isArray({ min: 1 }),
+  body('customer_name').optional().trim(),
+  body('customer_phone').optional().trim(),
 ], validate, adminPlaceOrder);
+
+// Assign rider to order
+router.put('/orders/:id/rider', requireRole('super_admin', 'admin'), [
+  body('rider_id').optional({ nullable: true }).isInt(),
+], validate, assignRiderToOrder);
 
 // ── Users ─────────────────────────────────────────────────────────
 router.get('/users', adminGetUsers);
@@ -129,12 +137,21 @@ router.post('/locations', requireRole('super_admin'), [
 ], validate, createLocation);
 router.put('/locations/:id', requireRole('super_admin'), updateLocation);
 
+// ── Delivery Riders ───────────────────────────────────────────────
+router.get('/riders', getDeliveryRiders);
+router.post('/riders', requireRole('super_admin', 'admin'), [
+  body('name').trim().notEmpty(),
+  body('phone').trim().notEmpty(),
+], validate, createDeliveryRider);
+router.put('/riders/:id', requireRole('super_admin', 'admin'), updateDeliveryRider);
+router.delete('/riders/:id', requireRole('super_admin', 'admin'), deleteDeliveryRider);
+
 // ── Coupons ───────────────────────────────────────────────────────
 router.get('/coupons', adminGetCoupons);
 router.post('/coupons', requireRole('super_admin', 'admin'), [
   body('code').trim().notEmpty(),
-  body('discount_type').isIn(['percentage', 'flat']),
-  body('discount_value').isNumeric(),
+  body('discount_type').isIn(['percentage', 'flat', 'buy_1_get_1']),
+  body('discount_value').if(body('discount_type').isIn(['percentage', 'flat'])).isNumeric(),
   body('valid_from').isISO8601(),
   body('valid_until').isISO8601(),
 ], validate, createCoupon);
