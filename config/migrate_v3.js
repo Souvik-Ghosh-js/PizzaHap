@@ -72,6 +72,10 @@ const migrate = async () => {
     console.warn('SKIP  Coupons ENUM:', e.message);
   }
 
+  // ── Coupons: applicable_product_ids for targeted BOGO ───────────
+  await addColumnIfMissing(pool, 'Coupons', 'applicable_product_ids',
+    'JSON NULL COMMENT "Array of product IDs BOGO applies to; NULL = all products"');
+
   console.log('\nv3 migrations complete!');
   process.exit(0);
 };

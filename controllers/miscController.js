@@ -90,11 +90,15 @@ const validateCoupon = async (req, res, next) => {
       discount = coupon.discount_value;
     }
     // buy_1_get_1: calculated_discount = 0 here; actual discount computed at order time based on cheapest item
+    const applicableIds = coupon.applicable_product_ids
+      ? (typeof coupon.applicable_product_ids === 'string' ? JSON.parse(coupon.applicable_product_ids) : coupon.applicable_product_ids)
+      : [];
     return success(res, {
       coupon_id: coupon.id, code: coupon.code,
       discount_type: coupon.discount_type, discount_value: coupon.discount_value,
       calculated_discount: parseFloat(discount.toFixed(2)), description: coupon.description,
       is_bogo: coupon.discount_type === 'buy_1_get_1',
+      applicable_product_ids: applicableIds,  // empty array = applies to all
     });
   } catch (err) { next(err); }
 };

@@ -867,15 +867,19 @@ const adminGetCoupons = async (req, res, next) => {
 
 const createCoupon = async (req, res, next) => {
   try {
-    const { code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until } = req.body;
+    const { code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until, applicable_product_ids } = req.body;
     // buy_1_get_1 coupons don't need a discount_value (stored as 0)
     const resolvedDiscountValue = discount_type === 'buy_1_get_1' ? 0 : (discount_value || 0);
+    // applicable_product_ids: array of product IDs or null/empty = all products
+    const productIds = Array.isArray(applicable_product_ids) && applicable_product_ids.length > 0
+      ? JSON.stringify(applicable_product_ids.map(Number))
+      : null;
     await query(
-      `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until, applicable_product_ids)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [code.toUpperCase(), description, discount_type, resolvedDiscountValue,
       min_order_value || 0, max_discount || null, usage_limit || null,
-      per_user_limit || 1, new Date(valid_from), new Date(valid_until)]
+      per_user_limit || 1, new Date(valid_from), new Date(valid_until), productIds]
     );
     return created(res, {}, 'Coupon created');
   } catch (err) { next(err); }

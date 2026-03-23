@@ -35,8 +35,11 @@ const calculateOrder = async (req, res, next) => {
     const { items, coupon_code, delivery_type = 'delivery', coins_to_redeem = 0 } = req.body;
     let subtotal = 0;
 
+    // Build prices once — reused for BOGO filtering
+    const itemPriceMap = [];
     for (const item of items) {
       const price = await buildItemPrice(item);
+      itemPriceMap.push({ product_id: item.product_id, price });
       subtotal += price * (item.quantity || 1);
     }
     subtotal = parseFloat(subtotal.toFixed(2));
@@ -44,7 +47,6 @@ const calculateOrder = async (req, res, next) => {
     const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
     let discount_amount = 0, coupon = null;
 
-    const itemPrices = [];
     if (coupon_code) {
       const couponResult = await query(
         `SELECT * FROM Coupons WHERE code = ? AND is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW() AND (usage_limit IS NULL OR used_count < usage_limit)`,
@@ -54,12 +56,14 @@ const calculateOrder = async (req, res, next) => {
       coupon = couponResult[0];
       if (subtotal < coupon.min_order_value) return badRequest(res, `Min order Rs.${coupon.min_order_value} required`);
       if (coupon.discount_type === 'buy_1_get_1') {
-        // Build per-item prices to find cheapest (the free item)
-        for (const item of items) {
-          const p = await buildItemPrice(item);
-          itemPrices.push(p);
-        }
-        discount_amount = itemPrices.length ? parseFloat(Math.min(...itemPrices).toFixed(2)) : 0;
+        const applicableIds = coupon.applicable_product_ids
+          ? (typeof coupon.applicable_product_ids === 'string' ? JSON.parse(coupon.applicable_product_ids) : coupon.applicable_product_ids)
+          : [];
+        const eligible = applicableIds.length > 0
+          ? itemPriceMap.filter(i => applicableIds.includes(i.product_id))
+          : itemPriceMap;
+        if (!eligible.length) return badRequest(res, 'No eligible items in cart for this BOGO coupon');
+        discount_amount = parseFloat(Math.min(...eligible.map(i => i.price)).toFixed(2));
       } else if (coupon.discount_type === 'percentage') {
         discount_amount = Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity);
         discount_amount = parseFloat(discount_amount.toFixed(2));
@@ -146,12 +150,14 @@ const placeOrder = async (req, res, next) => {
       const coupon = couponResult[0];
       if (subtotal < coupon.min_order_value) return badRequest(res, `Min order Rs.${coupon.min_order_value} required`);
       if (coupon.discount_type === 'buy_1_get_1') {
-        const itemPrices = [];
-        for (const item of items) {
-          const p = await buildItemPrice(item);
-          itemPrices.push(p);
-        }
-        discount_amount = itemPrices.length ? parseFloat(Math.min(...itemPrices).toFixed(2)) : 0;
+        const applicableIds = coupon.applicable_product_ids
+          ? (typeof coupon.applicable_product_ids === 'string' ? JSON.parse(coupon.applicable_product_ids) : coupon.applicable_product_ids)
+          : [];
+        const eligible = applicableIds.length > 0
+          ? orderItems.filter(i => applicableIds.includes(i.product_id))
+          : orderItems;
+        if (!eligible.length) return badRequest(res, 'No eligible items in cart for this BOGO coupon');
+        discount_amount = parseFloat(Math.min(...eligible.map(i => i.unit_price)).toFixed(2));
       } else if (coupon.discount_type === 'percentage') {
         discount_amount = Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity);
         discount_amount = parseFloat(discount_amount.toFixed(2));

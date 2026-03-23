@@ -382,6 +382,12 @@
             "type": "string",
             "format": "date-time"
           },
+          "applicable_product_ids": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "nullable": true,
+            "description": "buy_1_get_1 only: product IDs eligible for the free item. null or empty = all products."
+          },
           "is_active": {
             "type": "boolean"
           }
@@ -3092,6 +3098,13 @@
                   "valid_until": {
                     "type": "string",
                     "format": "date-time"
+                  },
+                  "applicable_product_ids": {
+                    "type": "array",
+                    "items": { "type": "integer" },
+                    "nullable": true,
+                    "example": [3, 7, 12],
+                    "description": "buy_1_get_1 only: list of product IDs eligible for the free item. Omit or pass [] to apply to all products in the cart."
                   }
                 }
               }
