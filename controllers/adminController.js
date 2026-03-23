@@ -209,6 +209,7 @@ const adminPlaceOrder = async (req, res, next) => {
       items, location_id, delivery_type = 'pickup',
       delivery_address, special_instructions,
       payment_method = 'cash_on_delivery',
+      coupon_code,
     } = req.body;
 
     const resolvedLocationId = req.admin.location_id || (location_id ? parseInt(location_id) : null);
@@ -283,8 +284,39 @@ const adminPlaceOrder = async (req, res, next) => {
     subtotal = parseFloat(subtotal.toFixed(2));
     const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
 
+    // ── Coupon discount ───────────────────────────────────────────
+    let discount_amount = 0;
+    let couponId = null;
+    if (coupon_code) {
+      const couponResult = await query(
+        `SELECT * FROM Coupons WHERE code = ? AND is_active = 1
+         AND valid_from <= NOW() AND valid_until >= NOW()
+         AND (usage_limit IS NULL OR used_count < usage_limit)`,
+        [coupon_code.toUpperCase()]
+      );
+      if (!couponResult.length) return badRequest(res, 'Invalid or expired coupon');
+      const coupon = couponResult[0];
+      if (subtotal < coupon.min_order_value) return badRequest(res, `Min order Rs.${coupon.min_order_value} required for this coupon`);
+      if (coupon.discount_type === 'buy_1_get_1') {
+        const applicableIds = coupon.applicable_product_ids
+          ? (typeof coupon.applicable_product_ids === 'string' ? JSON.parse(coupon.applicable_product_ids) : coupon.applicable_product_ids)
+          : [];
+        const eligible = applicableIds.length > 0
+          ? orderItems.filter(i => applicableIds.includes(i.product_id))
+          : orderItems;
+        if (!eligible.length) return badRequest(res, 'No eligible items for this BOGO coupon');
+        discount_amount = parseFloat(Math.min(...eligible.map(i => i.unit_price)).toFixed(2));
+      } else if (coupon.discount_type === 'percentage') {
+        discount_amount = Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity);
+        discount_amount = parseFloat(discount_amount.toFixed(2));
+      } else {
+        discount_amount = parseFloat(parseFloat(coupon.discount_value).toFixed(2));
+      }
+      couponId = coupon.id;
+    }
+
     // NO TAX
-    const total_amount = parseFloat((subtotal + delivery_fee).toFixed(2));
+    const total_amount = parseFloat((subtotal - discount_amount + delivery_fee).toFixed(2));
     const order_number = `ADM-${Date.now().toString().slice(-6)}${Math.floor(1000 + Math.random() * 9000)}`;
 
     const orderId = await transaction(async (conn) => {
@@ -292,12 +324,12 @@ const adminPlaceOrder = async (req, res, next) => {
         `INSERT INTO Orders
           (order_number, user_id, location_id, delivery_type,
            delivery_address, subtotal, discount_amount, delivery_fee,
-           tax_amount, total_amount, special_instructions, payment_status, payment_method,
+           tax_amount, total_amount, coupon_id, special_instructions, payment_status, payment_method,
            customer_name, customer_phone)
-         VALUES (?,?,?,?,?,?,0,?,0,?,?,'pending',?,?,?)`,
+         VALUES (?,?,?,?,?,?,?,?,0,?,?,?,'pending',?,?,?)`,
         [order_number, user_id || null, resolvedLocationId, delivery_type,
-         delivery_address || null, subtotal, delivery_fee, total_amount,
-         special_instructions || null, payment_method,
+         delivery_address || null, subtotal, discount_amount, delivery_fee, total_amount,
+         couponId || null, special_instructions || null, payment_method,
          customer_name || null, customer_phone || null]
       );
       const newOrderId = orderResult.insertId;
@@ -318,6 +350,16 @@ const adminPlaceOrder = async (req, res, next) => {
           await conn.execute(
             `INSERT INTO OrderItemToppings (order_item_id, topping_id, topping_name, price) VALUES (?,?,?,?)`,
             [itemResult.insertId, topping.id, topping.name, topping.price]
+          );
+        }
+      }
+
+      if (couponId) {
+        await conn.execute(`UPDATE Coupons SET used_count = used_count + 1 WHERE id = ?`, [couponId]);
+        if (user_id) {
+          await conn.execute(
+            `INSERT INTO UserCouponUsage (user_id, coupon_id, order_id) VALUES (?,?,?)`,
+            [user_id, couponId, newOrderId]
           );
         }
       }
@@ -358,7 +400,7 @@ const adminPlaceOrder = async (req, res, next) => {
         'order', { order_id: orderId, order_number });
     }
 
-    return created(res, { order_id: orderId, order_number, total_amount, payment_method }, 'In-house order created');
+    return created(res, { order_id: orderId, order_number, subtotal, discount_amount, total_amount, payment_method }, 'In-house order created');
   } catch (err) { 
     console.error('Order placement error:', err);
     next(err); 

@@ -245,6 +245,12 @@
               "online"
             ]
           },
+          "coupon_code": {
+            "type": "string",
+            "nullable": true,
+            "example": "SAVE20",
+            "description": "Optional coupon code — supports percentage, flat, and buy_1_get_1 types"
+          },
           "special_instructions": {
             "type": "string",
             "nullable": true
@@ -2159,7 +2165,7 @@
         },
         "responses": {
           "201": {
-            "description": "In-house order created. Returns order_id, order_number, total_amount, payment_method."
+            "description": "In-house order created. Returns order_id, order_number, subtotal, discount_amount, total_amount, payment_method."
           }
         }
       }

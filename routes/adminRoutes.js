@@ -69,6 +69,7 @@ router.post('/orders/inhouse', requireRole('super_admin', 'admin'), [
   body('items').isArray({ min: 1 }),
   body('customer_name').optional().trim(),
   body('customer_phone').optional().trim(),
+  body('coupon_code').optional().trim(),
 ], validate, adminPlaceOrder);
 
 // Assign rider to order
