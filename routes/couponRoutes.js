@@ -6,7 +6,7 @@ const { authenticate } = require('../middlewares/auth');
 const { validate } = require('../middlewares/errorHandler');
 
 router.get('/', authenticate, getActiveCoupons);
-router.post('/validate', authenticate, [
+router.post('/validate', [
   body('code').trim().notEmpty(),
   body('order_value').isNumeric(),
 ], validate, validateCoupon);

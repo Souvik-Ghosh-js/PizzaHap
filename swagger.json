@@ -1735,6 +1735,7 @@
         "tags": [
           "Coupons"
         ],
+        "security": [],
         "summary": "Validate a coupon code and calculate discount",
         "requestBody": {
           "required": true,
