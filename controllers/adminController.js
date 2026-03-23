@@ -877,7 +877,7 @@ const createCoupon = async (req, res, next) => {
     await query(
       `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until, applicable_product_ids)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      [code.toUpperCase(), description, discount_type, resolvedDiscountValue,
+      [code.toUpperCase(), description || null, discount_type, resolvedDiscountValue,
       min_order_value || 0, max_discount || null, usage_limit || null,
       per_user_limit || 1, new Date(valid_from), new Date(valid_until), productIds]
     );
