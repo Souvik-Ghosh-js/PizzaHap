@@ -18,9 +18,6 @@ const {
   adminGetCoupons, createCoupon, updateCoupon,
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
   sendNotificationToUsers,
-  getIngredients, createIngredient, updateIngredient, deleteIngredient,
-  getLowStockAlerts, getStockLogs,
-  getProductIngredients, setProductIngredients,
 } = require('../controllers/adminController');
 const { getAllRefunds, processRefund } = require('../controllers/refundController');
 const { adminGetAllTickets, adminReplyTicket } = require('../controllers/supportController');
@@ -173,27 +170,6 @@ router.post('/notifications/broadcast', requireRole('super_admin', 'admin'), [
 // ── Refunds ───────────────────────────────────────────────────────
 router.get('/refunds', getAllRefunds);
 router.post('/refunds/:id/process', requireRole('super_admin', 'admin'), processRefund);
-
-// ── Inventory ─────────────────────────────────────────────────────
-router.get('/inventory',              getIngredients);
-router.get('/inventory/alerts',       getLowStockAlerts);
-router.get('/inventory/:id/logs',     getStockLogs);
-router.post('/inventory', requireRole('super_admin', 'admin'), [
-  body('name').trim().notEmpty(),
-  body('unit').trim().notEmpty(),
-  body('current_stock').isNumeric(),
-  body('low_stock_threshold').isNumeric(),
-], validate, createIngredient);
-router.put('/inventory/:id', requireRole('super_admin', 'admin'), updateIngredient);
-router.delete('/inventory/:id', requireRole('super_admin', 'admin'), deleteIngredient);
-
-// Product recipe (ingredients per product)
-router.get('/menu/products/:id/ingredients', getProductIngredients);
-router.put('/menu/products/:id/ingredients', requireRole('super_admin', 'admin'), [
-  body('ingredients').isArray(),
-  body('ingredients.*.ingredient_id').isInt(),
-  body('ingredients.*.quantity').isNumeric(),
-], validate, setProductIngredients);
 
 // ── Support ───────────────────────────────────────────────────────
 router.get('/support/tickets', adminGetAllTickets);
