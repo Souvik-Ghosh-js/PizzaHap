@@ -710,6 +710,23 @@
             "description": "Internal order ID"
           }
         }
+      },
+      "AdminReview": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "order_id": { "type": "integer" },
+          "food_rating": { "type": "integer" },
+          "delivery_rating": { "type": "integer", "nullable": true },
+          "overall_rating": { "type": "integer" },
+          "comment": { "type": "string", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "order_number": { "type": "string" },
+          "location_id": { "type": "integer" },
+          "user_name": { "type": "string" },
+          "user_mobile": { "type": "string" },
+          "location_name": { "type": "string", "nullable": true }
+        }
       }
     }
   },
@@ -802,6 +819,10 @@
     {
       "name": "Admin — Support",
       "description": "Support ticket management"
+    },
+    {
+      "name": "Admin — Feedback",
+      "description": "View and manage user ratings and reviews"
     }
   ],
   "paths": {
@@ -2254,6 +2275,60 @@
         }
       }
     },
+    "/admin/orders/{id}/accept-reject": {
+      "put": {
+        "tags": [
+          "Admin — Orders"
+        ],
+        "summary": "Explicitly accept or reject a pending order",
+        "description": "Used by admin to process new orders. 'accept' triggers confirmed status. 'reject' triggers cancelled status and auto-refunds coins.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "accept",
+                      "reject"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "nullable": true,
+                    "example": "Out of stock"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Order accepted or rejected"
+          },
+          "400": {
+            "description": "Invalid action or order not pending"
+          }
+        }
+      }
+    },
     "/admin/orders/{id}/payment-status": {
       "put": {
         "tags": [
@@ -2326,6 +2401,57 @@
         "responses": {
           "200": {
             "description": "Invoice object including coins_redeemed, payment_method, payment_status"
+          }
+        }
+      }
+    },
+    "/admin/reviews": {
+      "get": {
+        "tags": [
+          "Admin — Feedback"
+        ],
+        "summary": "List all user feedback / reviews (paginated)",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "location_id",
+            "schema": { "type": "integer" },
+            "description": "Filter by location (super_admin only)"
+          },
+          {
+            "in": "query",
+            "name": "min_rating",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 5 }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "schema": { "type": "integer", "default": 1 }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": { "type": "integer", "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated reviews list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/AdminReview" }
+                    },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
           }
         }
       }

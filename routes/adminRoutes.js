@@ -6,6 +6,7 @@ const { body } = require('express-validator');
 const {
   adminLogin, getDashboard, getReports,
   adminGetOrders, adminGetOrderDetail, updateOrderStatus, updatePaymentStatus, adminPlaceOrder,
+  acceptRejectOrder,
   adminGetUsers, blockUser,
   adminGetCategories, createCategory, updateCategory, uploadCategoryImage,
   adminGetProducts, createProduct, updateProduct, deleteProduct,
@@ -18,6 +19,7 @@ const {
   adminGetCoupons, createCoupon, updateCoupon,
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
   sendNotificationToUsers,
+  adminGetReviews,
 } = require('../controllers/adminController');
 const { getAllRefunds, processRefund } = require('../controllers/refundController');
 const { adminGetAllTickets, adminReplyTicket } = require('../controllers/supportController');
@@ -76,6 +78,12 @@ router.post('/orders/inhouse', requireRole('super_admin', 'admin'), [
 router.put('/orders/:id/rider', requireRole('super_admin', 'admin'), [
   body('rider_id').optional({ nullable: true }).isInt(),
 ], validate, assignRiderToOrder);
+
+// Accept / Reject a pending order
+router.put('/orders/:id/accept-reject', requireRole('super_admin', 'admin'), [
+  body('action').isIn(['accept', 'reject']).withMessage('action must be accept or reject'),
+  body('reason').optional().trim(),
+], validate, acceptRejectOrder);
 
 // ── Users ─────────────────────────────────────────────────────────
 router.get('/users', adminGetUsers);
@@ -174,5 +182,8 @@ router.post('/refunds/:id/process', requireRole('super_admin', 'admin'), process
 // ── Support ───────────────────────────────────────────────────────
 router.get('/support/tickets', adminGetAllTickets);
 router.post('/support/tickets/:id/reply', [body('message').trim().notEmpty()], validate, adminReplyTicket);
+
+// ── Reviews ─────────────────────────────────────────────────
+router.get('/reviews', adminGetReviews);
 
 module.exports = router;

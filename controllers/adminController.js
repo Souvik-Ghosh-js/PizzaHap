@@ -952,6 +952,99 @@ const updateCoupon = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Accept / Reject Order ────────────────────────────────────────
+const acceptRejectOrder = async (req, res, next) => {
+  try {
+    const { action, reason } = req.body;
+    if (!['accept', 'reject'].includes(action)) return badRequest(res, 'action must be accept or reject');
+    const orderId = req.params.id;
+    const lid = req.admin.location_id;
+    let where = `WHERE id = ?`;
+    const params = [orderId];
+    if (lid) { where += ` AND location_id = ?`; params.push(lid); }
+    const [orderRow] = await query(`SELECT * FROM Orders ${where}`, params);
+    if (!orderRow) return notFound(res, 'Order not found');
+    if (orderRow.status !== 'pending') return badRequest(res, 'Can only accept/reject pending orders');
+
+    if (action === 'accept') {
+      await query(`UPDATE Orders SET status = 'confirmed', updated_at = NOW() WHERE id = ?`, [orderId]);
+      await query(
+        `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role) VALUES (?,'confirmed',?,?,'admin')`,
+        [orderId, reason || 'Order accepted by admin', req.admin.id]
+      );
+      if (orderRow.user_id) {
+        await notifyUser(orderRow.user_id, 'Order Accepted!',
+          `Your order ${orderRow.order_number} has been accepted and will be prepared shortly.`,
+          'order', { order_id: orderRow.id, order_number: orderRow.order_number, status: 'confirmed' });
+      }
+      return success(res, {}, 'Order accepted');
+    } else {
+      const cancelReason = reason || 'Rejected by admin';
+      await transaction(async (conn) => {
+        await conn.execute(
+          `UPDATE Orders SET status = 'cancelled', cancellation_reason = ?, cancellation_time = NOW(), cancelled_by = 'admin', updated_at = NOW() WHERE id = ?`,
+          [cancelReason, orderId]
+        );
+        await conn.execute(
+          `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role) VALUES (?,'cancelled',?,?,'admin')`,
+          [orderId, cancelReason, req.admin.id]
+        );
+        // Refund coins if any were redeemed
+        if (orderRow.coins_redeemed > 0) {
+          await conn.execute(
+            `INSERT INTO UserCoins (user_id, balance) VALUES (?,?) ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance), updated_at = NOW()`,
+            [orderRow.user_id, orderRow.coins_redeemed]
+          );
+          await conn.execute(
+            `INSERT INTO CoinTransactions (user_id, order_id, type, coins, description) VALUES (?,?,'reverted',?,'Order rejected by admin - coins restored')`,
+            [orderRow.user_id, orderId, orderRow.coins_redeemed]
+          );
+        }
+      });
+      if (orderRow.user_id) {
+        await notifyUser(orderRow.user_id, 'Order Rejected',
+          `Sorry, your order ${orderRow.order_number} was rejected. Reason: ${cancelReason}`,
+          'order', { order_id: orderRow.id, order_number: orderRow.order_number, status: 'cancelled' });
+      }
+      return success(res, {}, 'Order rejected');
+    }
+  } catch (err) { next(err); }
+};
+
+// ── Reviews / Feedback ────────────────────────────────────────────
+const adminGetReviews = async (req, res, next) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const offset = (page - 1) * limit;
+    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    const { min_rating, max_rating } = req.query;
+    let where = 'WHERE 1=1';
+    const params = [];
+    if (lid)         { where += ' AND o.location_id = ?';        params.push(lid); }
+    if (min_rating)  { where += ' AND f.overall_rating >= ?';    params.push(parseInt(min_rating)); }
+    if (max_rating)  { where += ' AND f.overall_rating <= ?';    params.push(parseInt(max_rating)); }
+    const [countRes, rows] = await Promise.all([
+      query(`SELECT COUNT(*) as total FROM OrderFeedback f JOIN Orders o ON f.order_id = o.id ${where}`, params),
+      query(
+        `SELECT f.id, f.order_id, f.food_rating, f.delivery_rating, f.overall_rating, f.comment, f.created_at,
+                o.order_number, o.location_id,
+                u.name as user_name, u.mobile as user_mobile,
+                l.name as location_name
+         FROM OrderFeedback f
+         JOIN Orders o ON f.order_id = o.id
+         JOIN Users  u ON f.user_id  = u.id
+         LEFT JOIN Locations l ON o.location_id = l.id
+         ${where}
+         ORDER BY f.created_at DESC
+         LIMIT ${limit} OFFSET ${offset}`,
+        params
+      ),
+    ]);
+    return paginated(res, rows, countRes[0].total, page, limit);
+  } catch (err) { next(err); }
+};
+
 // ── Admin Notifications ───────────────────────────────────────────
 const getAdminNotifications = async (req, res, next) => {
   try {
@@ -1005,6 +1098,7 @@ const sendNotificationToUsers = async (req, res, next) => {
 module.exports = {
   adminLogin, getDashboard, getReports,
   adminGetOrders, adminGetOrderDetail, updateOrderStatus, updatePaymentStatus, adminPlaceOrder,
+  acceptRejectOrder,
   adminGetUsers, blockUser,
   adminGetCategories, createCategory, updateCategory, uploadCategoryImage,
   adminGetProducts, createProduct, updateProduct, deleteProduct, uploadProductImage,
@@ -1017,4 +1111,5 @@ module.exports = {
   adminGetCoupons, createCoupon, updateCoupon,
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
   sendNotificationToUsers,
+  adminGetReviews,
 };
