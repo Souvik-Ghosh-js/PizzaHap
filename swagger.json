@@ -325,6 +325,18 @@
           }
         }
       },
+      "IngredientBody": {
+        "type": "object",
+        "required": ["name", "unit", "current_stock", "low_stock_threshold"],
+        "properties": {
+          "name": {"type": "string", "example": "Mozzarella Cheese"},
+          "unit": {"type": "string", "example": "kg", "description": "pieces, kg, g, liters, ml"},
+          "current_stock": {"type": "number", "example": 10.5},
+          "low_stock_threshold": {"type": "number", "example": 2},
+          "location_id": {"type": "integer", "nullable": true, "description": "null = global ingredient"},
+          "is_active": {"type": "boolean", "default": true}
+        }
+      },
       "DeliveryRider": {
         "type": "object",
         "properties": {
@@ -3547,6 +3559,115 @@
             "description": "Reply sent"
           }
         }
+      }
+    },
+    "/admin/inventory": {
+      "get": {
+        "tags": ["Admin — Inventory"],
+        "summary": "List all ingredients",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"in": "query", "name": "location_id", "schema": {"type": "integer"}, "description": "Filter by location (omit for global)"}
+        ],
+        "responses": {"200": {"description": "Array of ingredients with stock levels"}}
+      },
+      "post": {
+        "tags": ["Admin — Inventory"],
+        "summary": "Create an ingredient",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/IngredientBody"}
+            }
+          }
+        },
+        "responses": {"201": {"description": "Ingredient created"}}
+      }
+    },
+    "/admin/inventory/alerts": {
+      "get": {
+        "tags": ["Admin — Inventory"],
+        "summary": "Get low stock alerts",
+        "security": [{"bearerAuth": []}],
+        "responses": {"200": {"description": "Array of ingredients below their low_stock_threshold"}}
+      }
+    },
+    "/admin/inventory/{id}": {
+      "put": {
+        "tags": ["Admin — Inventory"],
+        "summary": "Update an ingredient",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "integer"}}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/IngredientBody"}
+            }
+          }
+        },
+        "responses": {"200": {"description": "Ingredient updated"}}
+      },
+      "delete": {
+        "tags": ["Admin — Inventory"],
+        "summary": "Delete an ingredient",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "integer"}}],
+        "responses": {"200": {"description": "Ingredient deleted"}}
+      }
+    },
+    "/admin/inventory/{id}/logs": {
+      "get": {
+        "tags": ["Admin — Inventory"],
+        "summary": "Get stock change logs for an ingredient",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"in": "path", "name": "id", "required": true, "schema": {"type": "integer"}},
+          {"in": "query", "name": "limit", "schema": {"type": "integer", "default": 50}}
+        ],
+        "responses": {"200": {"description": "Array of StockLog entries (negative = consumed, positive = restocked)"}}
+      }
+    },
+    "/admin/menu/products/{id}/ingredients": {
+      "get": {
+        "tags": ["Admin — Inventory"],
+        "summary": "Get ingredient recipe for a product",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "integer"}}],
+        "responses": {"200": {"description": "Array of {ingredient_id, name, unit, quantity} per product unit"}}
+      },
+      "put": {
+        "tags": ["Admin — Inventory"],
+        "summary": "Set ingredient recipe for a product (replaces existing)",
+        "security": [{"bearerAuth": []}],
+        "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "integer"}}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ingredients"],
+                "properties": {
+                  "ingredients": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["ingredient_id", "quantity"],
+                      "properties": {
+                        "ingredient_id": {"type": "integer"},
+                        "quantity": {"type": "number", "description": "Amount consumed per 1 unit of product"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "Recipe saved"}}
       }
     },
     "/payments/create-order": {
