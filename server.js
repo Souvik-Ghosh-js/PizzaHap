@@ -26,10 +26,8 @@ const PORT = process.env.PORT || 5000;
 // ─── SECURITY & GLOBAL MIDDLEWARES ───────────────────────────────
 app.use(helmet());
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? (process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['http://13.232.73.121'])
-    : '*',
-  credentials: true,
+  origin: '*',
+  credentials: false,
 }));
 
 // Rate limiter — global
