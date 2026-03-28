@@ -8,7 +8,7 @@ const {
   adminGetOrders, adminGetOrderDetail, updateOrderStatus, updatePaymentStatus, adminPlaceOrder,
   acceptRejectOrder,
   adminGetUsers, blockUser,
-  adminGetCategories, createCategory, updateCategory, uploadCategoryImage,
+  adminGetCategories, createCategory, updateCategory, deleteCategory, uploadCategoryImage,
   adminGetProducts, createProduct, updateProduct, deleteProduct,
   uploadProductImage, setProductLocationAvailability, getProductAvailabilityMatrix,
   adminGetProductSizes, createProductSize, updateProductSize, deleteProductSize,
