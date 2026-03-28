@@ -331,6 +331,7 @@
           "id": { "type": "integer" },
           "name": { "type": "string", "example": "Amit Kumar" },
           "phone": { "type": "string", "example": "9876543210" },
+          "email": { "type": "string", "example": "amit@pizzahap.com", "nullable": true },
           "location_id": { "type": "integer", "nullable": true },
           "location_name": { "type": "string", "nullable": true },
           "is_active": { "type": "boolean" },
@@ -2546,6 +2547,11 @@
                     "type": "boolean",
                     "default": false
                   },
+                  "stock_quantity": {
+                    "type": "integer",
+                    "default": 0,
+                    "description": "Initial stock level"
+                  },
                   "sizes": {
                     "type": "array",
                     "description": "If omitted, a single 'Regular' size is created at base_price",
@@ -2618,6 +2624,10 @@
                   },
                   "is_available": {
                     "type": "boolean"
+                  },
+                  "stock_quantity": {
+                    "type": "integer",
+                    "nullable": true
                   }
                 }
               }
@@ -3069,6 +3079,7 @@
                 "properties": {
                   "name": { "type": "string", "example": "Amit Kumar" },
                   "phone": { "type": "string", "example": "9876543210" },
+                  "email": { "type": "string", "example": "amit@pizzahap.com", "nullable": true },
                   "location_id": {
                     "type": "integer",
                     "nullable": true,
@@ -3100,6 +3111,7 @@
                 "properties": {
                   "name": { "type": "string" },
                   "phone": { "type": "string" },
+                  "email": { "type": "string", "nullable": true },
                   "is_active": { "type": "boolean" },
                   "location_id": { "type": "integer", "nullable": true }
                 }
@@ -3872,6 +3884,36 @@
         "responses": {
           "200": {
             "description": "Category updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin — Categories"
+        ],
+        "summary": "Deactivate a category (soft delete)",
+        "description": "Sets is_active=0. Fails if category has active products.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Category deactivated"
+          },
+          "400": {
+            "description": "Internal dependency: cannot delete category with active products"
           }
         }
       }

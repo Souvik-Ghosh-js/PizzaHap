@@ -152,6 +152,49 @@ const sendEmail = async (to, subject, html) => {
   }
 };
 
+// ─── ORDER STATUS EMAIL ───────────────────────────────────────────
+const sendOrderStatusEmail = async (to, orderNumber, status) => {
+  const statusMessages = {
+    delivered: 'Great news! Your order has been delivered. Enjoy your meal!',
+    cancelled: 'Your order has been cancelled. If you have any questions, please contact support.',
+  };
+  const subject = `Update for your Order #${orderNumber}`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 32px; border: 1px solid #e5e7eb; border-radius: 8px;">
+      <h2 style="color: #111827; margin-bottom: 16px;">Order ${status.charAt(0).toUpperCase() + status.slice(1)}</h2>
+      <p style="color: #4b5563; line-height: 1.6;">Hello,</p>
+      <p style="color: #4b5563; line-height: 1.6;">${statusMessages[status] || `Your order #${orderNumber} status changed to ${status}.`}</p>
+      <div style="margin: 24px 0; padding: 16px; background: #f9fafb; border-radius: 6px; border: 1px solid #f3f4f6;">
+        <span style="color: #6b7280; font-size: 14px;">Order Number:</span>
+        <strong style="color: #111827; display: block; font-size: 18px;">${orderNumber}</strong>
+      </div>
+      <p style="color: #9ca3af; font-size: 13px; margin-top: 24px;">
+        Thank you for choosing PizzaHap!
+      </p>
+    </div>
+  `;
+  return await sendEmail(to, subject, html);
+};
+
+// ─── RIDER ASSIGNMENT EMAIL ───────────────────────────────────────
+const sendRiderAssignmentEmail = async (riderEmail, riderName, orderNumber, deliveryDetails) => {
+  const subject = `New Order Assigned: #${orderNumber}`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 32px; border: 1px solid #e5e7eb; border-radius: 8px;">
+      <h2 style="color: #111827; margin-bottom: 16px;">New Order Assigned</h2>
+      <p style="color: #4b5563; line-height: 1.6;">Hello ${riderName},</p>
+      <p style="color: #4b5563; line-height: 1.6;">A new order has been assigned to you for delivery.</p>
+      <div style="margin: 24px 0; padding: 16px; background: #fefce8; border-radius: 6px; border: 1px solid #fef9c3;">
+        <strong style="color: #854d0e; display: block; margin-bottom: 8px;">Order Details:</strong>
+        <p style="margin: 4px 0; color: #713f12;"><strong>Order:</strong> #${orderNumber}</p>
+        <p style="margin: 4px 0; color: #713f12;"><strong>Address:</strong> ${deliveryDetails}</p>
+      </div>
+      <p style="color: #4b5563; line-height: 1.6;">Please proceed to the kitchen to pick up the order.</p>
+    </div>
+  `;
+  return await sendEmail(riderEmail, subject, html);
+};
+
 module.exports = {
   generateOTP,
   storeOTP,
@@ -161,4 +204,6 @@ module.exports = {
   verifyEmailOTP,
   incrementOTPAttempt,
   sendEmail,
+  sendOrderStatusEmail,
+  sendRiderAssignmentEmail,
 };

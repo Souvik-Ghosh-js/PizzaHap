@@ -95,6 +95,7 @@ router.post('/menu/categories', requireRole('super_admin', 'admin'), [
   body('name').trim().notEmpty(),
 ], validate, createCategory);
 router.put('/menu/categories/:id', requireRole('super_admin', 'admin'), updateCategory);
+router.delete('/menu/categories/:id', requireRole('super_admin', 'admin'), deleteCategory);
 router.post('/menu/categories/:id/image', requireRole('super_admin', 'admin'), uploadCategory.single('image'), uploadCategoryImage);
 
 // ── Products ──────────────────────────────────────────────────────
