@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "migrate": "node config/migrate.js",
     "migrate:v2": "node config/migrate_v2.js",
+    "migrate:v6": "node config/migrate_v6.js",
     "seed": "node config/seed.js"
   },
   "dependencies": {
