@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const axios = require('axios');
-const { query } = require('../config/db');
+const { query, transaction } = require('../config/db');
 const { success, created, badRequest, notFound } = require('../utils/response');
 const { notifyUser, notifyAdmins } = require('../services/notificationService');
 const logger = require('../utils/logger');
@@ -224,6 +224,50 @@ const handleWebhook = async (req, res, next) => {
       return res.redirect(`${process.env.APP_URL}/api/payments/result?status=success&order_id=${orderId}`);
     } else {
       await query(`UPDATE Payments SET status = 'failed', updated_at = NOW() WHERE gateway_order_id = ?`, [txnid]);
+
+      // Cancel the order and restore stock/coins/coupon on failed payment
+      const orderRes = await query(`SELECT * FROM Orders WHERE id = ? AND status = 'pending'`, [orderId]);
+      if (orderRes.length) {
+        const failedOrder = orderRes[0];
+        await transaction(async (conn) => {
+          // Mark order as cancelled
+          await conn.execute(
+            `UPDATE Orders SET status = 'cancelled', payment_status = 'failed', cancellation_reason = 'Payment failed', cancellation_time = NOW(), cancelled_by = 'system', updated_at = NOW() WHERE id = ?`,
+            [orderId]
+          );
+          await conn.execute(
+            `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by_role) VALUES (?, 'cancelled', 'Auto-cancelled: payment failed', 'system')`,
+            [orderId]
+          );
+          // Restore stock
+          const items = await query(`SELECT product_id, quantity FROM OrderItems WHERE order_id = ?`, [orderId]);
+          for (const item of items) {
+            await conn.execute(
+              `UPDATE Products SET stock_quantity = stock_quantity + ? WHERE id = ?`,
+              [item.quantity, item.product_id]
+            );
+          }
+          // Restore coins
+          if (failedOrder.coins_redeemed > 0) {
+            await conn.execute(
+              `INSERT INTO UserCoins (user_id, balance) VALUES (?, ?) ON DUPLICATE KEY UPDATE balance = balance + VALUES(balance), updated_at = NOW()`,
+              [failedOrder.user_id, failedOrder.coins_redeemed]
+            );
+            await conn.execute(
+              `INSERT INTO CoinTransactions (user_id, order_id, type, coins, description) VALUES (?, ?, 'reverted', ?, 'Payment failed - coins restored')`,
+              [failedOrder.user_id, orderId, failedOrder.coins_redeemed]
+            );
+          }
+          // Revert coupon usage
+          if (failedOrder.coupon_id) {
+            await conn.execute(`UPDATE Coupons SET used_count = GREATEST(0, used_count - 1) WHERE id = ?`, [failedOrder.coupon_id]);
+            await conn.execute(`DELETE FROM UserCouponUsage WHERE user_id = ? AND order_id = ?`, [failedOrder.user_id, orderId]);
+          }
+        });
+        // Notify user
+        await notifyUser(failedOrder.user_id, 'Payment Failed', `Payment for order ${failedOrder.order_number} failed. Your order has been cancelled.`, 'order', { order_id: orderId, order_number: failedOrder.order_number });
+      }
+
       return res.redirect(`${process.env.APP_URL}/api/payments/result?status=failed&order_id=${orderId}`);
     }
   } catch (err) {
