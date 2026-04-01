@@ -115,12 +115,12 @@ const createPaymentOrder = async (req, res, next) => {
 // ── Verify payment (client-side callback) ────────────────────────
 const verifyPayment = async (req, res, next) => {
   try {
-    // Accept both PayU naming and legacy razorpay field names for compatibility
     const txnid    = req.body.txnid    || req.body.razorpay_order_id;
     const mihpayid = req.body.mihpayid || req.body.razorpay_payment_id;
     const hash     = req.body.hash     || req.body.razorpay_signature;
-    const order_id = req.body.udf1     || req.body.order_id;
-    const status   = req.body.status   || 'success';
+    const status   = req.body.status;
+
+    if (!txnid || !hash || !status) return badRequest(res, 'Missing required fields: txnid, hash, status');
 
     const paymentResult = await query(
       `SELECT p.*, o.order_number, o.total_amount, u.name, u.email, u.mobile
@@ -150,36 +150,47 @@ const verifyPayment = async (req, res, next) => {
     }
 
     await query(
-      `UPDATE Payments SET gateway_payment_id = ?, gateway_signature = ?, status = 'captured', updated_at = NOW() WHERE gateway_order_id = ?`,
+      `UPDATE Payments SET gateway_payment_id = ?, gateway_signature = ?, status = 'captured', updated_at = NOW()
+       WHERE gateway_order_id = ? AND status != 'captured'`,
       [mihpayid, hash, txnid]
     );
     await query(
-      `UPDATE Orders SET payment_status = 'paid', status = 'confirmed', updated_at = NOW() WHERE id = ?`,
+      `UPDATE Orders SET payment_status = 'paid', status = 'confirmed', updated_at = NOW()
+       WHERE id = ? AND payment_status != 'paid'`,
       [payment.order_id]
     );
     await query(
-      `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by_role) VALUES (?, 'confirmed', 'Payment verified via PayU', 'system')`,
-      [payment.order_id]
+      `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by_role)
+       SELECT ?, 'confirmed', 'Payment verified via PayU', 'system'
+       FROM Orders WHERE id = ? AND payment_status = 'paid' LIMIT 1`,
+      [payment.order_id, payment.order_id]
     );
     return success(res, { payment_id: mihpayid, order_id: payment.order_id }, 'Payment successful');
   } catch (err) { next(err); }
 };
 
-// ── PayU webhook (server-to-server) ──────────────────────────────
+// ── PayU webhook / surl+furl redirect ────────────────────────────
 const handleWebhook = async (req, res, next) => {
   try {
     const { status, txnid, amount, productinfo, firstname, email, udf1, mihpayid, hash } = req.body;
     logger.info(`PayU webhook: status=${status}, txnid=${txnid}`);
 
-    if (!txnid || !hash) return res.status(400).send('Missing params');
+    if (!txnid || !hash || !status) {
+      return res.redirect(`${process.env.APP_URL}/api/payments/result?status=failed&order_id=0`);
+    }
 
-    const isValid = verifyPayUHash({ status, txnid, amount, productinfo, firstname, email, udf1: udf1 || '', hash });
+    const isValid = verifyPayUHash({ status, txnid, amount: amount || '', productinfo: productinfo || '', firstname: firstname || '', email: email || '', udf1: udf1 || '', hash });
     if (!isValid) {
       logger.warn(`PayU webhook invalid hash for txnid=${txnid}`);
-      return res.status(400).send('Invalid hash');
+      return res.redirect(`${process.env.APP_URL}/api/payments/result?status=failed&order_id=${parseInt(udf1) || 0}`);
     }
 
     const orderId = parseInt(udf1);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      logger.warn(`PayU webhook invalid order_id in udf1=${udf1}`);
+      return res.redirect(`${process.env.APP_URL}/api/payments/result?status=failed&order_id=0`);
+    }
+
     if (status === 'success') {
       await query(
         `UPDATE Payments SET gateway_payment_id = ?, gateway_signature = ?, status = 'captured', updated_at = NOW()
@@ -193,18 +204,18 @@ const handleWebhook = async (req, res, next) => {
       );
       await query(
         `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by_role)
-         SELECT ?, 'confirmed', 'Payment confirmed via PayU webhook', 'system'
+         SELECT ?, 'confirmed', 'Payment confirmed via PayU', 'system'
          FROM Orders WHERE id = ? AND payment_status = 'paid' LIMIT 1`,
         [orderId, orderId]
       );
-    } else if (['failure', 'failed', 'cancel', 'cancelled'].includes(status)) {
+      return res.redirect(`${process.env.APP_URL}/api/payments/result?status=success&order_id=${orderId}`);
+    } else {
       await query(`UPDATE Payments SET status = 'failed', updated_at = NOW() WHERE gateway_order_id = ?`, [txnid]);
+      return res.redirect(`${process.env.APP_URL}/api/payments/result?status=failed&order_id=${orderId}`);
     }
-
-    res.status(200).send('OK');
   } catch (err) {
     logger.error(`PayU webhook error: ${err.message}`);
-    res.status(500).send('Webhook error');
+    res.redirect(`${process.env.APP_URL}/api/payments/result?status=failed&order_id=0`);
   }
 };
 

@@ -5,7 +5,9 @@
       "Bash(find c:/Pizzahap -type f \\\\\\(-name *.mp3 -o -name *.wav -o -name *.ogg \\\\\\))",
       "Bash(find c:/Pizzahap -name *.md -type f)",
       "Bash(xargs grep:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(find c:/Pizzahap/PizzaHap -name .env* -o -name *.env*)",
+      "Bash(flutter pub:*)"
     ],
     "additionalDirectories": [
       "c:\\Pizzahap\\pizzahapApp\\pizzahap-main\\lib\\models",

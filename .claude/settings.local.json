@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e \"const s = require\\(''./swagger.json''\\); console.log\\(''Valid JSON. Paths:'', Object.keys\\(s.paths\\).filter\\(p => p.includes\\(''rider''\\) || p.includes\\(''inhouse''\\) || p.includes\\(''coupons''\\)\\).join\\('', ''\\)\\); console.log\\(''Schemas:'', Object.keys\\(s.components.schemas\\).filter\\(k => k.includes\\(''Rider''\\) || k.includes\\(''Coupon''\\) || k.includes\\(''AdminPlace''\\)\\).join\\('', ''\\)\\);\")"
+      "Bash(node -e \"const s = require\\(''./swagger.json''\\); console.log\\(''Valid JSON. Paths:'', Object.keys\\(s.paths\\).filter\\(p => p.includes\\(''rider''\\) || p.includes\\(''inhouse''\\) || p.includes\\(''coupons''\\)\\).join\\('', ''\\)\\); console.log\\(''Schemas:'', Object.keys\\(s.components.schemas\\).filter\\(k => k.includes\\(''Rider''\\) || k.includes\\(''Coupon''\\) || k.includes\\(''AdminPlace''\\)\\).join\\('', ''\\)\\);\")",
+      "Bash(flutter analyze:*)"
     ]
   }
 }
