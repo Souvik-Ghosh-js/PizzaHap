@@ -142,9 +142,10 @@ const finalizeOrderInternal = async (txnid) => {
   const { placeOrderDirect } = require('./orderController'); // We'll add this internal method
 
   // Call the refactored placeOrder method that doesn't expect a Request object
-  const orderId = await placeOrderDirect(init.user_id, orderData);
+  const result = await placeOrderDirect(init.user_id, orderData);
   
-  if (orderId) {
+  if (result && result.id) {
+    const orderId = result.id;
     await query(`UPDATE PaymentInitiations SET status = 'completed' WHERE id = ?`, [init.id]);
     await query(`INSERT INTO Payments (order_id, gateway_order_id, payment_method, amount, status) VALUES (?, ?, 'online', ?, 'captured')`, [orderId, txnid, init.amount]);
     return orderId;
