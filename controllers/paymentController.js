@@ -101,14 +101,6 @@ const initiateOnlinePayment = async (req, res, next) => {
     const total_amount = await calculateOrderAmount(orderData, req.user);
     const txnid = generateTxnId();
 
-    // Ensure the temp table exists in case restart didn't happen
-    await query(`CREATE TABLE IF NOT EXISTS PaymentInitiations (
-      id INT AUTO_INCREMENT PRIMARY KEY, txnid VARCHAR(100) NOT NULL UNIQUE,
-      user_id INT NOT NULL, order_data TEXT NOT NULL, amount DECIMAL(10, 2) NOT NULL,
-      status ENUM('pending', 'completed', 'failed') DEFAULT 'pending',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
-
     await query(
       `INSERT INTO PaymentInitiations (txnid, user_id, order_data, amount) VALUES (?, ?, ?, ?)`,
       [txnid, userId, JSON.stringify(orderData), total_amount]
