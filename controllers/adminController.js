@@ -1125,10 +1125,18 @@ const getAdminNotifications = async (req, res, next) => {
     const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
       ? (location_id ? parseInt(location_id) : null)
       : req.admin.location_id;
-    let where = `WHERE (an.admin_id = ?`;
-    const params = [req.admin.id];
-    if (lid) { where += ` OR an.location_id = ?`; params.push(lid); }
-    where += `)`;
+    
+    let where = 'WHERE 1=1';
+    const params = [];
+    if (lid) {
+      // Branch-specific mode: Show only notifications for this location or dedicated to this admin
+      where += ` AND (an.location_id = ? OR (an.location_id IS NULL AND an.admin_id = ?))`;
+      params.push(lid, req.admin.id);
+    } else {
+      // All Branches mode: Show all notifications except specifically for other admins
+      where += ` AND (an.admin_id = ? OR an.admin_id IS NULL)`;
+      params.push(req.admin.id);
+    }
     const rows = await query(
       `SELECT an.* FROM AdminNotifications an ${where} ORDER BY an.created_at DESC LIMIT 100`, params
     );
