@@ -1,22 +1,22 @@
 require('dotenv').config();
-const express    = require('express');
-const http       = require('http');
-const cors       = require('cors');
-const helmet     = require('helmet');
-const morgan     = require('morgan');
-const rateLimit  = require('express-rate-limit');
-const path       = require('path');
-const fs         = require('fs');
+const express = require('express');
+const http = require('http');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+const fs = require('fs');
 const { Server } = require('socket.io');
 
-const { getPool }   = require('./config/db');
-const { setIO }     = require('./config/socket');
-const routes        = require('./routes');
+const { getPool } = require('./config/db');
+const { setIO } = require('./config/socket');
+const routes = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
-const logger        = require('./utils/logger');
+const logger = require('./utils/logger');
 const { setupSwagger } = require('./swagger');
 
-const app  = express();
+const app = express();
 const server = http.createServer(app);
 
 // ─── SOCKET.IO ──────────────────────────────────────────────────
@@ -96,8 +96,7 @@ app.use(errorHandler);
 // ─── START ───────────────────────────────────────────────────────
 const start = async () => {
   try {
-    const pool = await getPool();
-    
+    await getPool();
     server.listen(PORT, () => {
       logger.info(`🍕 PizzaHap Backend running on port ${PORT}`);
       console.log(`🍕 Server:  http://localhost:${PORT}`);
