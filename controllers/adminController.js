@@ -307,7 +307,7 @@ const adminPlaceOrder = async (req, res, next) => {
     }
 
     subtotal = parseFloat(subtotal.toFixed(2));
-    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 00 : 0);//changed here delivery fee
+    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 0 : 0);//changed here delivery fee
 
     // ── Coupon discount ───────────────────────────────────────────
     let discount_amount = 0;
@@ -1020,9 +1020,9 @@ const acceptRejectOrder = async (req, res, next) => {
     const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
       ? (location_id ? parseInt(location_id) : null)
       : req.admin.location_id;
-    let where = `WHERE id = ?`;
+    let where = `WHERE o.id = ?`;
     const params = [orderId];
-    if (lid) { where += ` AND location_id = ?`; params.push(lid); }
+    if (lid) { where += ` AND o.location_id = ?`; params.push(lid); }
     const [orderRow] = await query(
       `SELECT o.*, u.email as user_email FROM Orders o
        LEFT JOIN Users u ON o.user_id = u.id
