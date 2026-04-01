@@ -26,8 +26,14 @@ setIO(io);
 io.on('connection', (socket) => {
   // Admin joins a room based on their location so they only get relevant events
   socket.on('join_admin', (locationId) => {
+    // Everyone joins 'admin_all' for truly global announcements
     socket.join('admin_all');
-    if (locationId) socket.join(`admin_loc_${locationId}`);
+    if (locationId) {
+      socket.join(`admin_loc_${locationId}`);
+    } else {
+      // Super admins only join this room to get all location-specific events without duplication
+      socket.join('admin_super');
+    }
   });
 });
 

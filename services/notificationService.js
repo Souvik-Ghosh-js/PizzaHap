@@ -69,9 +69,14 @@ const notifyAdmins = async (locationId, title, message, type = 'order', data = n
     const io = getIO();
     if (io) {
       const payload = { title, message, type: safeType, data };
-      io.to('admin_all').emit('admin_notification', payload);
       if (locationId) {
+        // Send to specific location admins
         io.to(`admin_loc_${locationId}`).emit('admin_notification', payload);
+        // AND to Super admins
+        io.to('admin_super').emit('admin_notification', payload);
+      } else {
+        // For truly global notifications or if no location, send to everyone
+        io.to('admin_all').emit('admin_notification', payload);
       }
     }
   } catch (e) {
