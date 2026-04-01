@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const axios  = require('axios');
 const { query } = require('../config/db');
 const { success, created, badRequest, notFound } = require('../utils/response');
+const { notifyUser, notifyAdmins } = require('../services/notificationService');
 const logger = require('../utils/logger');
 
 const PAYU_BASE = process.env.PAYU_ENV === 'production'
@@ -123,7 +124,7 @@ const verifyPayment = async (req, res, next) => {
     if (!txnid || !hash || !status) return badRequest(res, 'Missing required fields: txnid, hash, status');
 
     const paymentResult = await query(
-      `SELECT p.*, o.order_number, o.total_amount, u.name, u.email, u.mobile
+      `SELECT p.*, o.order_number, o.total_amount, o.user_id, o.location_id, u.name, u.email, u.mobile
        FROM Payments p
        JOIN Orders o ON p.order_id = o.id
        JOIN Users u  ON o.user_id  = u.id
@@ -154,17 +155,22 @@ const verifyPayment = async (req, res, next) => {
        WHERE gateway_order_id = ? AND status != 'captured'`,
       [mihpayid, hash, txnid]
     );
-    await query(
+
+    const updateRes = await query(
       `UPDATE Orders SET payment_status = 'paid', status = 'confirmed', updated_at = NOW()
        WHERE id = ? AND payment_status != 'paid'`,
       [payment.order_id]
     );
-    await query(
-      `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by_role)
-       SELECT ?, 'confirmed', 'Payment verified via PayU', 'system'
-       FROM Orders WHERE id = ? AND payment_status = 'paid' LIMIT 1`,
-      [payment.order_id, payment.order_id]
-    );
+
+    if (updateRes.affectedRows > 0) {
+      await query(
+        `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by_role) VALUES (?, 'confirmed', 'Payment verified via PayU', 'system')`,
+        [payment.order_id]
+      );
+      // Trigger notifications for online payment now that it is confirmed
+      await notifyUser(payment.user_id, 'Order Placed!', `Your order ${payment.order_number} confirmed. Total: Rs.${payment.total_amount}`, 'order', { order_id: payment.order_id, order_number: payment.order_number });
+      await notifyAdmins(payment.location_id, 'New Order Received', `Order ${payment.order_number} (Rs.${payment.total_amount}) - Paid Online`, 'order', { order_id: payment.order_id, order_number: payment.order_number, payment_method: 'online' });
+    }
     return success(res, { payment_id: mihpayid, order_id: payment.order_id }, 'Payment successful');
   } catch (err) { next(err); }
 };
@@ -197,17 +203,24 @@ const handleWebhook = async (req, res, next) => {
          WHERE gateway_order_id = ? AND status != 'captured'`,
         [mihpayid || '', hash, txnid]
       );
-      await query(
+      const updateRes = await query(
         `UPDATE Orders SET payment_status = 'paid', status = 'confirmed', updated_at = NOW()
          WHERE id = ? AND payment_status != 'paid'`,
         [orderId]
       );
-      await query(
-        `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by_role)
-         SELECT ?, 'confirmed', 'Payment confirmed via PayU', 'system'
-         FROM Orders WHERE id = ? AND payment_status = 'paid' LIMIT 1`,
-        [orderId, orderId]
-      );
+      if (updateRes.affectedRows > 0) {
+        await query(
+          `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by_role) VALUES (?, 'confirmed', 'Payment confirmed via PayU', 'system')`,
+          [orderId]
+        );
+        // Fetch order details for notification
+        const orderRes = await query(`SELECT order_number, total_amount, user_id, location_id FROM Orders WHERE id = ?`, [orderId]);
+        if (orderRes.length) {
+          const o = orderRes[0];
+          await notifyUser(o.user_id, 'Order Placed!', `Your order ${o.order_number} confirmed. Total: Rs.${o.total_amount}`, 'order', { order_id: orderId, order_number: o.order_number });
+          await notifyAdmins(o.location_id, 'New Order Received', `Order ${o.order_number} (Rs.${o.total_amount}) - Paid Online`, 'order', { order_id: orderId, order_number: o.order_number, payment_method: 'online' });
+        }
+      }
       return res.redirect(`${process.env.APP_URL}/api/payments/result?status=success&order_id=${orderId}`);
     } else {
       await query(`UPDATE Payments SET status = 'failed', updated_at = NOW() WHERE gateway_order_id = ?`, [txnid]);

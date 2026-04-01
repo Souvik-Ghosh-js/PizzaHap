@@ -251,8 +251,10 @@ const placeOrder = async (req, res, next) => {
       return newOrderId;
     });
 
-    await notifyUser(userId, 'Order Placed!', `Your order ${order_number} placed. Total: Rs.${total_amount}`, 'order', { order_id: orderId, order_number });
-    await notifyAdmins(location_id, 'New Order Received', `Order ${order_number} (Rs.${total_amount}) - ${payment_method === 'cash_on_delivery' ? 'Cash on Delivery' : 'Online Payment'}`, 'order', { order_id: orderId, order_number, payment_method });
+    if (payment_method === 'cash_on_delivery') {
+      await notifyUser(userId, 'Order Placed!', `Your order ${order_number} placed. Total: Rs.${total_amount}`, 'order', { order_id: orderId, order_number });
+      await notifyAdmins(location_id, 'New Order Received', `Order ${order_number} (Rs.${total_amount}) - ${payment_method === 'cash_on_delivery' ? 'Cash on Delivery' : 'Online Payment'}`, 'order', { order_id: orderId, order_number, payment_method });
+    }
 
     return created(res, { order_id: orderId, order_number, total_amount, coins_redeemed: coinsToRedeem, coins_discount }, 'Order placed successfully');
   } catch (err) { next(err); }
