@@ -35,7 +35,9 @@ const adminLogin = async (req, res, next) => {
 // ── Dashboard ─────────────────────────────────────────────────────
 const getDashboard = async (req, res, next) => {
   try {
-    const lid = req.admin.location_id;
+    const lid = (req.admin.role === 'super_admin' && req.query.location_id !== undefined)
+      ? (req.query.location_id ? parseInt(req.query.location_id) : null)
+      : req.admin.location_id;
     const lf = lid ? ` AND location_id = ${parseInt(lid)}` : '';
     const olF = lid ? ` AND o.location_id = ${parseInt(lid)}` : '';
     const [todayOrders, totalRevenue, newUsers, pendingOrders, popularProducts] = await Promise.all([
@@ -58,8 +60,10 @@ const getDashboard = async (req, res, next) => {
 
 const getReports = async (req, res, next) => {
   try {
-    const { period = 'daily' } = req.query;
-    const lid = req.admin.location_id;
+    const { period = 'daily', location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     const lf = lid ? ` AND location_id = ${parseInt(lid)}` : '';
     let groupBy;
     if (period === 'daily') groupBy = `DATE(created_at)`;
@@ -79,11 +83,13 @@ const getReports = async (req, res, next) => {
 // ── Orders ────────────────────────────────────────────────────────
 const adminGetOrders = async (req, res, next) => {
   try {
-    const { status, payment_status } = req.query;
+    const { status, payment_status, location_id } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
-    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
     if (status) { where += ' AND o.status = ?'; params.push(status); }
@@ -106,7 +112,10 @@ const adminGetOrders = async (req, res, next) => {
 
 const adminGetOrderDetail = async (req, res, next) => {
   try {
-    const lid = req.admin.location_id;
+    const { location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = `WHERE o.id = ?`;
     const params = [req.params.id];
     if (lid) { where += ` AND o.location_id = ?`; params.push(lid); }
@@ -533,11 +542,13 @@ const uploadCategoryImage = async (req, res, next) => {
 // ── Products CRUD ─────────────────────────────────────────────────
 const adminGetProducts = async (req, res, next) => {
   try {
-    const { search, category_id, show_unavailable } = req.query;
+    const { search, category_id, show_unavailable, location_id } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
     const offset = (page - 1) * limit;
-    const lid = req.admin.location_id;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
     if (show_unavailable !== 'true') { where += ` AND p.is_available = 1`; }
@@ -857,7 +868,10 @@ const updateLocation = async (req, res, next) => {
 // ── Delivery Riders CRUD ──────────────────────────────────────────
 const getDeliveryRiders = async (req, res, next) => {
   try {
-    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    const { location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
     if (lid) { where += ' AND location_id = ?'; params.push(lid); }
@@ -1000,10 +1014,12 @@ const updateCoupon = async (req, res, next) => {
 // ── Accept / Reject Order ────────────────────────────────────────
 const acceptRejectOrder = async (req, res, next) => {
   try {
-    const { action, reason } = req.body;
+    const { action, reason, location_id } = req.body;
     if (!['accept', 'reject'].includes(action)) return badRequest(res, 'action must be accept or reject');
     const orderId = req.params.id;
-    const lid = req.admin.location_id;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = `WHERE id = ?`;
     const params = [orderId];
     if (lid) { where += ` AND location_id = ?`; params.push(lid); }
@@ -1072,8 +1088,10 @@ const adminGetReviews = async (req, res, next) => {
     const page  = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
-    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
-    const { min_rating, max_rating } = req.query;
+    const { min_rating, max_rating, location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
     if (lid)         { where += ' AND o.location_id = ?';        params.push(lid); }
@@ -1103,7 +1121,10 @@ const adminGetReviews = async (req, res, next) => {
 // ── Admin Notifications ───────────────────────────────────────────
 const getAdminNotifications = async (req, res, next) => {
   try {
-    const lid = req.admin.location_id;
+    const { location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = `WHERE (an.admin_id = ?`;
     const params = [req.admin.id];
     if (lid) { where += ` OR an.location_id = ?`; params.push(lid); }
