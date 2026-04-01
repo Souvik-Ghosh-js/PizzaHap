@@ -1,13 +1,19 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/Pizzahap/**)"
+      "Read(//c/Pizzahap/**)",
+      "Bash(find c:/Pizzahap -type f \\\\\\(-name *.mp3 -o -name *.wav -o -name *.ogg \\\\\\))",
+      "Bash(find c:/Pizzahap -name *.md -type f)",
+      "Bash(xargs grep:*)",
+      "Bash(npm install:*)"
     ],
     "additionalDirectories": [
       "c:\\Pizzahap\\pizzahapApp\\pizzahap-main\\lib\\models",
       "c:\\Pizzahap\\pizzahapApp\\pizzahap-main\\lib\\providers",
       "c:\\Pizzahap\\pizzahapApp\\pizzahap-main\\lib\\screens\\cart",
-      "c:\\Pizzahap\\PizzaHapAdmin\\src\\pages"
+      "c:\\Pizzahap\\PizzaHapAdmin\\src\\pages",
+      "c:\\Pizzahap\\PizzaHapAdmin\\src\\utils",
+      "c:\\Pizzahap\\PizzaHapAdmin\\src"
     ]
   }
 }

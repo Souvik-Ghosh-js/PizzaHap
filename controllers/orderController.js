@@ -329,6 +329,7 @@ const cancelOrder = async (req, res, next) => {
     });
 
     await notifyUser(req.user.id, 'Order Cancelled', `Your order ${order.order_number} has been cancelled.`, 'order', { order_id: order.id });
+    await notifyAdmins(order.location_id, 'Order Cancelled', `Order ${order.order_number} cancelled by customer.`, 'order', { order_id: order.id, order_number: order.order_number, status: 'cancelled' });
     return success(res, {}, 'Order cancelled successfully');
   } catch (err) { next(err); }
 };

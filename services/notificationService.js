@@ -3,6 +3,7 @@
  * Central helper to create user + admin notifications in one call.
  */
 const { query } = require('../config/db');
+const { getIO } = require('../config/socket');
 
 /**
  * Create a notification for a user.
@@ -62,6 +63,16 @@ const notifyAdmins = async (locationId, title, message, type = 'order', data = n
          VALUES (?, ?, ?, ?, ?, ?)`,
         [admin.id, locationId || null, title, message, safeType, dataStr]
       );
+    }
+
+    // Real-time push to admin panel via Socket.IO
+    const io = getIO();
+    if (io) {
+      const payload = { title, message, type: safeType, data };
+      io.to('admin_all').emit('admin_notification', payload);
+      if (locationId) {
+        io.to(`admin_loc_${locationId}`).emit('admin_notification', payload);
+      }
     }
   } catch (e) {
     console.error('notifyAdmins error:', e.message);

@@ -29,6 +29,7 @@
     "nodemailer": "^6.9.4",
     "pdfkit": "^0.13.0",
     "sharp": "^0.32.4",
+    "socket.io": "^4.8.3",
     "swagger-ui-express": "^5.0.1",
     "twilio": "^4.15.0",
     "uuid": "^9.0.0",
