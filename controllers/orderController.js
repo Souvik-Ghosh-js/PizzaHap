@@ -124,6 +124,11 @@ const placeOrder = async (req, res, next) => {
       if (!productResult.length) return badRequest(res, `Product not available`);
       const product = productResult[0];
 
+      // Stock check
+      if (product.stock_quantity < (item.quantity || 1)) {
+        return badRequest(res, `Insufficient stock for ${product.name}. Available: ${product.stock_quantity}`);
+      }
+
       let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
       const itemToppings = [];
       if (item.toppings?.length) {
@@ -215,6 +220,12 @@ const placeOrder = async (req, res, next) => {
             [itemResult.insertId, topping.id, topping.name, topping.price]
           );
         }
+
+        // Deduct stock
+        await conn.execute(
+          `UPDATE Products SET stock_quantity = stock_quantity - ? WHERE id = ?`,
+          [item.quantity || 1, item.product_id]
+        );
       }
 
       await conn.execute(

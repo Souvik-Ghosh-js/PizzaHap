@@ -5,6 +5,7 @@ const fs = require('fs');
 const { query, transaction } = require('../config/db');
 const { success, created, badRequest, notFound, paginated, unauthorized } = require('../utils/response');
 const { notifyUser, notifyAdmins, creditCoins, revertCoins } = require('../services/notificationService');
+const { sendOrderStatusEmail, sendRiderAssignmentEmail } = require('../services/otpService');
 
 // ── Auth ───────────────────────────────────────────────────────────
 const adminLogin = async (req, res, next) => {
@@ -146,7 +147,12 @@ const updateOrderStatus = async (req, res, next) => {
       refund_requested: ['refunded'],
       refunded: [],
     };
-    const [orderRow] = await query(`SELECT * FROM Orders WHERE id = ?`, [req.params.id]);
+    const [orderRow] = await query(
+      `SELECT o.*, u.email as user_email FROM Orders o
+       LEFT JOIN Users u ON o.user_id = u.id
+       WHERE o.id = ?`,
+      [req.params.id]
+    );
     if (!orderRow) return notFound(res, 'Order not found');
     if (!transitions[orderRow.status]?.includes(status)) {
       return badRequest(res, `Cannot transition from '${orderRow.status}' to '${status}'`);
@@ -167,6 +173,11 @@ const updateOrderStatus = async (req, res, next) => {
     if (orderRow.user_id && statusMessages[status]) {
       await notifyUser(orderRow.user_id, `Order ${status.replace(/_/g, ' ')}`, statusMessages[status], 'order',
         { order_id: orderRow.id, order_number: orderRow.order_number, status });
+    }
+
+    // Email notification for delivered/cancelled
+    if (orderRow.user_email && ['delivered', 'cancelled'].includes(status)) {
+      await sendOrderStatusEmail(orderRow.user_email, orderRow.order_number, status);
     }
 
     // Credit coins on delivery: 1 coin per Rs.10
@@ -255,6 +266,11 @@ const adminPlaceOrder = async (req, res, next) => {
       }
       
       const product = productResult[0];
+      
+      // Stock check
+      if (product.stock_quantity < (item.quantity || 1)) {
+        return badRequest(res, `Insufficient stock for ${product.name}. Available: ${product.stock_quantity}`);
+      }
 
       let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
       const itemToppings = [];
@@ -352,6 +368,12 @@ const adminPlaceOrder = async (req, res, next) => {
             [itemResult.insertId, topping.id, topping.name, topping.price]
           );
         }
+
+        // Deduct stock
+        await conn.execute(
+          `UPDATE Products SET stock_quantity = stock_quantity - ? WHERE id = ?`,
+          [item.quantity || 1, item.product_id]
+        );
       }
 
       if (couponId) {
@@ -485,6 +507,19 @@ const updateCategory = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const deleteCategory = async (req, res, next) => {
+  try {
+    const categoryId = req.params.id;
+    // Check if category has any products
+    const products = await query(`SELECT id FROM Products WHERE category_id = ? AND is_available = 1`, [categoryId]);
+    if (products.length > 0) {
+      return badRequest(res, 'Cannot delete category with active products. Please remove or disable products first.');
+    }
+    await query(`UPDATE Categories SET is_active = 0 WHERE id = ?`, [categoryId]);
+    return success(res, {}, 'Category deactivated');
+  } catch (err) { next(err); }
+};
+
 const uploadCategoryImage = async (req, res, next) => {
   try {
     if (!req.file) return badRequest(res, 'No image file provided');
@@ -532,10 +567,10 @@ const adminGetProducts = async (req, res, next) => {
 
 const createProduct = async (req, res, next) => {
   try {
-    const { category_id, name, description, base_price, is_veg, is_featured, sizes } = req.body;
+    const { category_id, name, description, base_price, is_veg, is_featured, stock_quantity = 0, sizes } = req.body;
     const r = await query(
-      `INSERT INTO Products (category_id, name, description, base_price, is_veg, is_featured) VALUES (?,?,?,?,?,?)`,
-      [category_id, name, description || null, parseFloat(base_price), is_veg ? 1 : 0, is_featured ? 1 : 0]
+      `INSERT INTO Products (category_id, name, description, base_price, is_veg, is_featured, stock_quantity) VALUES (?,?,?,?,?,?,?)`,
+      [category_id, name, description || null, parseFloat(base_price), is_veg ? 1 : 0, is_featured ? 1 : 0, stock_quantity]
     );
     const productId = r.insertId;
     if (sizes?.length) {
@@ -553,17 +588,18 @@ const createProduct = async (req, res, next) => {
 
 const updateProduct = async (req, res, next) => {
   try {
-    const { name, description, base_price, is_veg, is_featured, is_available, category_id } = req.body;
+    const { name, description, base_price, is_veg, is_featured, is_available, category_id, stock_quantity } = req.body;
     await query(
       `UPDATE Products SET
-         name        = IFNULL(?,name),
-         description = IFNULL(?,description),
-         base_price  = IFNULL(?,base_price),
-         is_veg      = IFNULL(?,is_veg),
-         is_featured = IFNULL(?,is_featured),
-         is_available= IFNULL(?,is_available),
-         category_id = IFNULL(?,category_id),
-         updated_at  = NOW()
+         name          = IFNULL(?,name),
+         description   = IFNULL(?,description),
+         base_price    = IFNULL(?,base_price),
+         is_veg        = IFNULL(?,is_veg),
+         is_featured   = IFNULL(?,is_featured),
+         is_available  = IFNULL(?,is_available),
+         category_id   = IFNULL(?,category_id),
+         stock_quantity= IFNULL(?,stock_quantity),
+         updated_at    = NOW()
        WHERE id = ?`,
       [
         name || null, description || null,
@@ -572,6 +608,7 @@ const updateProduct = async (req, res, next) => {
         is_featured != null ? (is_featured ? 1 : 0) : null,
         is_available != null ? (is_available ? 1 : 0) : null,
         category_id != null ? parseInt(category_id) : null,
+        stock_quantity != null ? parseInt(stock_quantity) : null,
         req.params.id,
       ]
     );
@@ -834,11 +871,11 @@ const getDeliveryRiders = async (req, res, next) => {
 
 const createDeliveryRider = async (req, res, next) => {
   try {
-    const { name, phone, location_id } = req.body;
+    const { name, phone, email, location_id } = req.body;
     const resolvedLocationId = req.admin.location_id || (location_id ? parseInt(location_id) : null);
     await query(
-      `INSERT INTO DeliveryRiders (name, phone, location_id) VALUES (?,?,?)`,
-      [name.trim(), phone.trim(), resolvedLocationId]
+      `INSERT INTO DeliveryRiders (name, phone, email, location_id) VALUES (?,?,?,?)`,
+      [name.trim(), phone.trim(), email ? email.trim() : null, resolvedLocationId]
     );
     return created(res, {}, 'Delivery rider added');
   } catch (err) { next(err); }
@@ -846,16 +883,17 @@ const createDeliveryRider = async (req, res, next) => {
 
 const updateDeliveryRider = async (req, res, next) => {
   try {
-    const { name, phone, is_active, location_id } = req.body;
+    const { name, phone, email, is_active, location_id } = req.body;
     await query(
       `UPDATE DeliveryRiders SET
          name        = IFNULL(?,name),
          phone       = IFNULL(?,phone),
+         email       = IFNULL(?,email),
          is_active   = IFNULL(?,is_active),
          location_id = IFNULL(?,location_id),
          updated_at  = NOW()
        WHERE id = ?`,
-      [name || null, phone || null,
+      [name || null, phone || null, email || null,
        is_active != null ? (is_active ? 1 : 0) : null,
        location_id ? parseInt(location_id) : null,
        req.params.id]
@@ -887,12 +925,19 @@ const assignRiderToOrder = async (req, res, next) => {
     );
 
     if (rider_id) {
-      const riderRows = await query(`SELECT name FROM DeliveryRiders WHERE id = ?`, [rider_id]);
+      const [rider] = await query(`SELECT name, email FROM DeliveryRiders WHERE id = ?`, [rider_id]);
+      const [order] = await query(`SELECT order_number, delivery_address FROM Orders WHERE id = ?`, [orderId]);
+      
       await query(
         `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
          SELECT ?, status, CONCAT('Rider assigned: ', ?), ?, 'admin' FROM Orders WHERE id = ?`,
-        [orderId, riderRows[0].name, req.admin.id, orderId]
+        [orderId, rider.name, req.admin.id, orderId]
       );
+
+      // Send email to rider
+      if (rider.email) {
+        await sendRiderAssignmentEmail(rider.email, rider.name, order.order_number, order.delivery_address || 'Pickup');
+      }
     }
 
     return success(res, {}, rider_id ? 'Rider assigned to order' : 'Rider unassigned from order');
@@ -962,7 +1007,12 @@ const acceptRejectOrder = async (req, res, next) => {
     let where = `WHERE id = ?`;
     const params = [orderId];
     if (lid) { where += ` AND location_id = ?`; params.push(lid); }
-    const [orderRow] = await query(`SELECT * FROM Orders ${where}`, params);
+    const [orderRow] = await query(
+      `SELECT o.*, u.email as user_email FROM Orders o
+       LEFT JOIN Users u ON o.user_id = u.id
+       ${where}`,
+      params
+    );
     if (!orderRow) return notFound(res, 'Order not found');
     if (orderRow.status !== 'pending') return badRequest(res, 'Can only accept/reject pending orders');
 
@@ -1005,6 +1055,11 @@ const acceptRejectOrder = async (req, res, next) => {
         await notifyUser(orderRow.user_id, 'Order Rejected',
           `Sorry, your order ${orderRow.order_number} was rejected. Reason: ${cancelReason}`,
           'order', { order_id: orderRow.id, order_number: orderRow.order_number, status: 'cancelled' });
+        
+        // Email notification
+        if (orderRow.user_email) {
+          await sendOrderStatusEmail(orderRow.user_email, orderRow.order_number, 'cancelled');
+        }
       }
       return success(res, {}, 'Order rejected');
     }
@@ -1100,7 +1155,7 @@ module.exports = {
   adminGetOrders, adminGetOrderDetail, updateOrderStatus, updatePaymentStatus, adminPlaceOrder,
   acceptRejectOrder,
   adminGetUsers, blockUser,
-  adminGetCategories, createCategory, updateCategory, uploadCategoryImage,
+  adminGetCategories, createCategory, updateCategory, deleteCategory, uploadCategoryImage,
   adminGetProducts, createProduct, updateProduct, deleteProduct, uploadProductImage,
   setProductLocationAvailability, getProductAvailabilityMatrix,
   adminGetProductSizes, createProductSize, updateProductSize, deleteProductSize,
