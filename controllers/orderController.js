@@ -96,168 +96,170 @@ const calculateOrder = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Internal helper: Place order without HTTP req ──────────────────
+const placeOrderDirect = async (userId, orderData) => {
+  const {
+    items, location_id, delivery_type = 'delivery',
+    delivery_address, delivery_latitude, delivery_longitude,
+    coupon_code, special_instructions,
+    payment_method = 'online',
+    coins_to_redeem = 0,
+  } = orderData;
+
+  let subtotal = 0;
+  const orderItems = [];
+
+  for (const item of items) {
+    const productResult = await query(
+      `SELECT p.*, ps.price as size_price, ps.size_name,
+              ct.extra_price as crust_extra, ct.name as crust_name
+       FROM Products p
+       JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
+       LEFT JOIN CrustTypes ct ON ct.id = ?
+       WHERE p.id = ? AND p.is_available = 1`,
+      [item.size_id, item.crust_id || null, item.product_id]
+    );
+    if (!productResult.length) throw new Error(`Product not available: ${item.product_id}`);
+    const product = productResult[0];
+
+    // Stock check
+    if (product.stock_quantity < (item.quantity || 1)) {
+      throw new Error(`Insufficient stock for ${product.name}`);
+    }
+
+    let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
+    const itemToppings = [];
+    if (item.toppings?.length) {
+      for (const tid of item.toppings) {
+        const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
+        if (tr.length) { itemPrice += parseFloat(tr[0].price); itemToppings.push(tr[0]); }
+      }
+    }
+    const total_price = parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));
+    subtotal += total_price;
+    orderItems.push({ ...item, product, unit_price: itemPrice, total_price, toppings: itemToppings });
+  }
+
+  subtotal = parseFloat(subtotal.toFixed(2));
+  const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
+  let discount_amount = 0, couponId = null;
+
+  if (coupon_code) {
+    const couponResult = await query(
+      `SELECT * FROM Coupons WHERE code = ? AND is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW() AND (usage_limit IS NULL OR used_count < usage_limit)`,
+      [coupon_code]
+    );
+    if (couponResult.length) {
+      const coupon = couponResult[0];
+      if (subtotal >= coupon.min_order_value) {
+        if (coupon.discount_type === 'buy_1_get_1') {
+          const applicableIds = coupon.applicable_product_ids
+            ? (typeof coupon.applicable_product_ids === 'string' ? JSON.parse(coupon.applicable_product_ids) : coupon.applicable_product_ids)
+            : [];
+          const eligible = applicableIds.length > 0
+            ? orderItems.filter(i => applicableIds.includes(i.product_id))
+            : orderItems;
+          if (eligible.length) {
+            discount_amount = parseFloat(Math.min(...eligible.map(i => i.unit_price)).toFixed(2));
+          }
+        } else if (coupon.discount_type === 'percentage') {
+          discount_amount = Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity);
+          discount_amount = parseFloat(discount_amount.toFixed(2));
+        } else {
+          discount_amount = parseFloat(parseFloat(coupon.discount_value).toFixed(2));
+        }
+        couponId = coupon.id;
+      }
+    }
+  }
+
+  let coins_discount = 0, coinsToRedeem = parseInt(coins_to_redeem) || 0;
+  if (coinsToRedeem > 0) {
+    const walletRow = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [userId]);
+    const available = walletRow.length ? walletRow[0].balance : 0;
+    coinsToRedeem = Math.min(coinsToRedeem, available);
+    coins_discount = Math.floor(Math.max(0, Math.min(coinsToRedeem, subtotal - discount_amount + delivery_fee)));
+    coinsToRedeem = coins_discount;
+  }
+
+  const total_amount = parseFloat((subtotal - discount_amount - coins_discount + delivery_fee).toFixed(2));
+  const order_number = generateOrderNumber();
+
+  const finalOrderId = await transaction(async (conn) => {
+    const [orderResult] = await conn.execute(
+      `INSERT INTO Orders
+        (order_number, user_id, location_id, delivery_type,
+         delivery_address, delivery_latitude, delivery_longitude,
+         subtotal, discount_amount, delivery_fee, tax_amount, total_amount,
+         coupon_id, special_instructions, payment_status, payment_method, coins_redeemed)
+       VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,'pending',?,?)`,
+      [
+        order_number, userId, location_id, delivery_type,
+        delivery_address || null, delivery_latitude || null, delivery_longitude || null,
+        subtotal, discount_amount, delivery_fee, total_amount,
+        couponId, special_instructions || null, 
+        payment_method === 'cash_on_delivery' ? 'pending' : 'paid',
+        payment_method, coinsToRedeem,
+      ]
+    );
+    const newOrderId = orderResult.insertId;
+
+    for (const item of orderItems) {
+      const [itemResult] = await conn.execute(
+        `INSERT INTO OrderItems
+          (order_id, product_id, product_name, size_id, size_name,
+           crust_id, crust_name, quantity, unit_price, total_price, special_instructions)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        [newOrderId, item.product_id, item.product.name, item.size_id,
+         item.product.size_name, item.crust_id || null, item.product.crust_name || null,
+         item.quantity || 1,
+         parseFloat(item.unit_price).toFixed(2), item.total_price,
+         item.special_instructions || null]
+      );
+      for (const topping of item.toppings) {
+        await conn.execute(
+          `INSERT INTO OrderItemToppings (order_item_id, topping_id, topping_name, price) VALUES (?,?,?,?)`,
+          [itemResult.insertId, topping.id, topping.name, topping.price]
+        );
+      }
+      await conn.execute(`UPDATE Products SET stock_quantity = stock_quantity - ? WHERE id = ?`, [item.quantity || 1, item.product_id]);
+    }
+
+    await conn.execute(
+      `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role) VALUES (?,'pending','Order placed',?,'user')`,
+      [newOrderId, userId]
+    );
+
+    if (couponId) {
+      await conn.execute(`UPDATE Coupons SET used_count = used_count + 1 WHERE id = ?`, [couponId]);
+      await conn.execute(`INSERT INTO UserCouponUsage (user_id, coupon_id, order_id) VALUES (?,?,?)`, [userId, couponId, newOrderId]);
+    }
+
+    if (coinsToRedeem > 0) {
+      await conn.execute(`UPDATE UserCoins SET balance = GREATEST(0, balance - ?), updated_at = NOW() WHERE user_id = ?`, [coinsToRedeem, userId]);
+      await conn.execute(`INSERT INTO CoinTransactions (user_id, order_id, type, coins, description) VALUES (?,?,'redeemed',?,?)`, [userId, newOrderId, coinsToRedeem, `Redeemed for order #${order_number}`]);
+    }
+    return newOrderId;
+  });
+
+  // Finalize: Success notifications
+  await notifyUser(userId, 'Order Placed!', `Your order ${order_number} confirmed. Total: Rs.${total_amount}`, 'order', { order_id: finalOrderId, order_number });
+  await notifyAdmins(location_id, 'New Order Received', `Order ${order_number} (Rs.${total_amount}) - ${payment_method === 'cash_on_delivery' ? 'Cash on Delivery' : 'Paid Online'}`, 'order', { order_id: finalOrderId, order_number, payment_method });
+
+  return { id: finalOrderId, order_number, total_amount, coins_redeemed: coinsToRedeem };
+};
+
 // ── Place order ───────────────────────────────────────────────────
 const placeOrder = async (req, res, next) => {
   try {
-    const {
-      items, location_id, delivery_type = 'delivery',
-      delivery_address, delivery_latitude, delivery_longitude,
-      coupon_code, special_instructions,
-      payment_method = 'online',
-      coins_to_redeem = 0,
-    } = req.body;
-    const userId = req.user.id;
-
-    let subtotal = 0;
-    const orderItems = [];
-
-    for (const item of items) {
-      const productResult = await query(
-        `SELECT p.*, ps.price as size_price, ps.size_name,
-                ct.extra_price as crust_extra, ct.name as crust_name
-         FROM Products p
-         JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
-         LEFT JOIN CrustTypes ct ON ct.id = ?
-         WHERE p.id = ? AND p.is_available = 1`,
-        [item.size_id, item.crust_id || null, item.product_id]
-      );
-      if (!productResult.length) return badRequest(res, `Product not available`);
-      const product = productResult[0];
-
-      // Stock check
-      if (product.stock_quantity < (item.quantity || 1)) {
-        return badRequest(res, `Insufficient stock for ${product.name}. Available: ${product.stock_quantity}`);
-      }
-
-      let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
-      const itemToppings = [];
-      if (item.toppings?.length) {
-        for (const tid of item.toppings) {
-          const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-          if (tr.length) { itemPrice += parseFloat(tr[0].price); itemToppings.push(tr[0]); }
-        }
-      }
-      const total_price = parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));
-      subtotal += total_price;
-      orderItems.push({ ...item, product, unit_price: itemPrice, total_price, toppings: itemToppings });
+    const result = await placeOrderDirect(req.user.id, req.body);
+    return created(res, { order_id: result.id, order_number: result.order_number, total_amount: result.total_amount, coins_redeemed: result.coins_redeemed }, 'Order placed successfully');
+  } catch (err) { 
+    if (err.message.includes('stock') || err.message.includes('available')) {
+      return badRequest(res, err.message);
     }
-
-    subtotal = parseFloat(subtotal.toFixed(2));
-    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
-    let discount_amount = 0, couponId = null;
-
-    if (coupon_code) {
-      const couponResult = await query(
-        `SELECT * FROM Coupons WHERE code = ? AND is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW() AND (usage_limit IS NULL OR used_count < usage_limit)`,
-        [coupon_code]
-      );
-      if (!couponResult.length) return badRequest(res, 'Invalid coupon');
-      const coupon = couponResult[0];
-      if (subtotal < coupon.min_order_value) return badRequest(res, `Min order Rs.${coupon.min_order_value} required`);
-      if (coupon.discount_type === 'buy_1_get_1') {
-        const applicableIds = coupon.applicable_product_ids
-          ? (typeof coupon.applicable_product_ids === 'string' ? JSON.parse(coupon.applicable_product_ids) : coupon.applicable_product_ids)
-          : [];
-        const eligible = applicableIds.length > 0
-          ? orderItems.filter(i => applicableIds.includes(i.product_id))
-          : orderItems;
-        if (!eligible.length) return badRequest(res, 'No eligible items in cart for this BOGO coupon');
-        discount_amount = parseFloat(Math.min(...eligible.map(i => i.unit_price)).toFixed(2));
-      } else if (coupon.discount_type === 'percentage') {
-        discount_amount = Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity);
-        discount_amount = parseFloat(discount_amount.toFixed(2));
-      } else {
-        discount_amount = parseFloat(parseFloat(coupon.discount_value).toFixed(2));
-      }
-      couponId = coupon.id;
-    }
-
-    let coins_discount = 0, coinsToRedeem = parseInt(coins_to_redeem) || 0;
-    if (coinsToRedeem > 0) {
-      const walletRow = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [userId]);
-      const available = walletRow.length ? walletRow[0].balance : 0;
-      coinsToRedeem = Math.min(coinsToRedeem, available);
-      coins_discount = Math.floor(Math.max(0, Math.min(coinsToRedeem, subtotal - discount_amount + delivery_fee)));
-      coinsToRedeem = coins_discount;
-    }
-
-    // NO TAX — total = subtotal - discount - coins_discount + delivery
-    const total_amount = parseFloat((subtotal - discount_amount - coins_discount + delivery_fee).toFixed(2));
-    const order_number = generateOrderNumber();
-
-    const orderId = await transaction(async (conn) => {
-      const [orderResult] = await conn.execute(
-        `INSERT INTO Orders
-          (order_number, user_id, location_id, delivery_type,
-           delivery_address, delivery_latitude, delivery_longitude,
-           subtotal, discount_amount, delivery_fee, tax_amount, total_amount,
-           coupon_id, special_instructions, payment_status, payment_method, coins_redeemed)
-         VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,'pending',?,?)`,
-        [
-          order_number, userId, location_id, delivery_type,
-          delivery_address || null, delivery_latitude || null, delivery_longitude || null,
-          subtotal, discount_amount, delivery_fee, total_amount,
-          couponId, special_instructions || null, payment_method, coinsToRedeem,
-        ]
-      );
-      const newOrderId = orderResult.insertId;
-
-      for (const item of orderItems) {
-        const [itemResult] = await conn.execute(
-          `INSERT INTO OrderItems
-            (order_id, product_id, product_name, size_id, size_name,
-             crust_id, crust_name, quantity, unit_price, total_price, special_instructions)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-          [newOrderId, item.product_id, item.product.name, item.size_id,
-           item.product.size_name, item.crust_id || null, item.product.crust_name || null,
-           item.quantity || 1,
-           parseFloat(item.unit_price).toFixed(2), item.total_price,
-           item.special_instructions || null]
-        );
-        for (const topping of item.toppings) {
-          await conn.execute(
-            `INSERT INTO OrderItemToppings (order_item_id, topping_id, topping_name, price) VALUES (?,?,?,?)`,
-            [itemResult.insertId, topping.id, topping.name, topping.price]
-          );
-        }
-
-        // Deduct stock
-        await conn.execute(
-          `UPDATE Products SET stock_quantity = stock_quantity - ? WHERE id = ?`,
-          [item.quantity || 1, item.product_id]
-        );
-      }
-
-      await conn.execute(
-        `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role) VALUES (?,'pending','Order placed',?,'user')`,
-        [newOrderId, userId]
-      );
-
-      if (couponId) {
-        await conn.execute(`UPDATE Coupons SET used_count = used_count + 1 WHERE id = ?`, [couponId]);
-        await conn.execute(`INSERT INTO UserCouponUsage (user_id, coupon_id, order_id) VALUES (?,?,?)`, [userId, couponId, newOrderId]);
-      }
-
-      if (coinsToRedeem > 0) {
-        await conn.execute(
-          `UPDATE UserCoins SET balance = GREATEST(0, balance - ?), updated_at = NOW() WHERE user_id = ?`,
-          [coinsToRedeem, userId]
-        );
-        await conn.execute(
-          `INSERT INTO CoinTransactions (user_id, order_id, type, coins, description) VALUES (?,?,'redeemed',?,?)`,
-          [userId, newOrderId, coinsToRedeem, `Redeemed for order #${order_number}`]
-        );
-      }
-      return newOrderId;
-    });
-
-    if (payment_method === 'cash_on_delivery') {
-      await notifyUser(userId, 'Order Placed!', `Your order ${order_number} placed. Total: Rs.${total_amount}`, 'order', { order_id: orderId, order_number });
-      await notifyAdmins(location_id, 'New Order Received', `Order ${order_number} (Rs.${total_amount}) - ${payment_method === 'cash_on_delivery' ? 'Cash on Delivery' : 'Online Payment'}`, 'order', { order_id: orderId, order_number, payment_method });
-    }
-
-    return created(res, { order_id: orderId, order_number, total_amount, coins_redeemed: coinsToRedeem, coins_discount }, 'Order placed successfully');
-  } catch (err) { next(err); }
+    next(err); 
+  }
 };
 
 const getMyOrders = async (req, res, next) => {
@@ -390,4 +392,5 @@ const getMyCoinBalance = async (req, res, next) => {
 module.exports = {
   calculateOrder, placeOrder, getMyOrders, getOrderById,
   cancelOrder, reorder, submitOrderFeedback, getMyCoinBalance,
+  placeOrderDirect,
 };

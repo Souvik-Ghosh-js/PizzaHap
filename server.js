@@ -96,7 +96,21 @@ app.use(errorHandler);
 // ─── START ───────────────────────────────────────────────────────
 const start = async () => {
   try {
-    await getPool();
+    const pool = await getPool();
+    // Ensure PaymentInitiations table exists for the professional flow
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS PaymentInitiations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        txnid VARCHAR(100) NOT NULL UNIQUE,
+        user_id INT NOT NULL,
+        order_data TEXT NOT NULL,
+        amount DECIMAL(10, 2) NOT NULL,
+        status ENUM('pending', 'completed', 'failed') DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_VALUE,
+        updated_at TIMESTAMP DEFAULT CURRENT_VALUE ON UPDATE CURRENT_VALUE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `.replace('CURRENT_VALUE', 'CURRENT_TIMESTAMP'));
+
     server.listen(PORT, () => {
       logger.info(`🍕 PizzaHap Backend running on port ${PORT}`);
       console.log(`🍕 Server:  http://localhost:${PORT}`);
