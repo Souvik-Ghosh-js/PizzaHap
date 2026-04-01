@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Pizzahap/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\Pizzahap\\pizzahapApp\\pizzahap-main\\lib\\models",
+      "c:\\Pizzahap\\pizzahapApp\\pizzahap-main\\lib\\providers",
+      "c:\\Pizzahap\\pizzahapApp\\pizzahap-main\\lib\\screens\\cart",
+      "c:\\Pizzahap\\PizzaHapAdmin\\src\\pages"
+    ]
+  }
+}
