@@ -240,7 +240,7 @@ const adminPlaceOrder = async (req, res, next) => {
 
     for (const item of items) {
       let productResult;
-      
+
       // Handle products with sizes vs without sizes
       if (item.size_id) {
         // Product has a size - use the size price
@@ -264,7 +264,7 @@ const adminPlaceOrder = async (req, res, next) => {
           [item.crust_id || null, item.product_id]
         );
       }
-      
+
       if (!productResult.length) {
         console.log('Product not found with params:', {
           size_id: item.size_id,
@@ -273,9 +273,9 @@ const adminPlaceOrder = async (req, res, next) => {
         });
         return badRequest(res, `Product ${item.product_id} not available`);
       }
-      
+
       const product = productResult[0];
-      
+
       // Stock check
       if (product.stock_quantity < (item.quantity || 1)) {
         return badRequest(res, `Insufficient stock for ${product.name}. Available: ${product.stock_quantity}`);
@@ -283,31 +283,31 @@ const adminPlaceOrder = async (req, res, next) => {
 
       let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
       const itemToppings = [];
-      
+
       if (item.toppings?.length) {
         for (const tid of item.toppings) {
           const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-          if (tr.length) { 
-            itemPrice += parseFloat(tr[0].price); 
-            itemToppings.push(tr[0]); 
+          if (tr.length) {
+            itemPrice += parseFloat(tr[0].price);
+            itemToppings.push(tr[0]);
           }
         }
       }
-      
+
       const total_price = parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));
       subtotal += total_price;
-      
-      orderItems.push({ 
-        ...item, 
-        product, 
-        unit_price: itemPrice, 
-        total_price, 
-        toppings: itemToppings 
+
+      orderItems.push({
+        ...item,
+        product,
+        unit_price: itemPrice,
+        total_price,
+        toppings: itemToppings
       });
     }
 
     subtotal = parseFloat(subtotal.toFixed(2));
-    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
+    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 00 : 0);//changed here delivery fee
 
     // ── Coupon discount ───────────────────────────────────────────
     let discount_amount = 0;
@@ -353,9 +353,9 @@ const adminPlaceOrder = async (req, res, next) => {
            customer_name, customer_phone)
          VALUES (?,?,?,?,?,?,?,?,0,?,?,?,'pending',?,?,?)`,
         [order_number, user_id || null, resolvedLocationId, delivery_type,
-         delivery_address || null, subtotal, discount_amount, delivery_fee, total_amount,
-         couponId || null, special_instructions || null, payment_method,
-         customer_name || null, customer_phone || null]
+          delivery_address || null, subtotal, discount_amount, delivery_fee, total_amount,
+          couponId || null, special_instructions || null, payment_method,
+          customer_name || null, customer_phone || null]
       );
       const newOrderId = orderResult.insertId;
 
@@ -366,11 +366,11 @@ const adminPlaceOrder = async (req, res, next) => {
              crust_id, crust_name, quantity, unit_price, total_price)
            VALUES (?,?,?,?,?,?,?,?,?,?)`,
           [newOrderId, item.product_id, item.product.name, item.size_id || null,
-           item.product.size_name || 'Regular', item.crust_id || null, 
-           item.product.crust_name || null, item.quantity || 1, 
-           parseFloat(item.unit_price).toFixed(2), item.total_price]
+            item.product.size_name || 'Regular', item.crust_id || null,
+            item.product.crust_name || null, item.quantity || 1,
+            parseFloat(item.unit_price).toFixed(2), item.total_price]
         );
-        
+
         for (const topping of item.toppings) {
           await conn.execute(
             `INSERT INTO OrderItemToppings (order_item_id, topping_id, topping_name, price) VALUES (?,?,?,?)`,
@@ -432,9 +432,9 @@ const adminPlaceOrder = async (req, res, next) => {
     }
 
     return created(res, { order_id: orderId, order_number, subtotal, discount_amount, total_amount, payment_method }, 'In-house order created');
-  } catch (err) { 
+  } catch (err) {
     console.error('Order placement error:', err);
-    next(err); 
+    next(err);
   }
 };
 
@@ -908,9 +908,9 @@ const updateDeliveryRider = async (req, res, next) => {
          updated_at  = NOW()
        WHERE id = ?`,
       [name || null, phone || null, email || null,
-       is_active != null ? (is_active ? 1 : 0) : null,
-       location_id ? parseInt(location_id) : null,
-       req.params.id]
+      is_active != null ? (is_active ? 1 : 0) : null,
+      location_id ? parseInt(location_id) : null,
+      req.params.id]
     );
     return success(res, {}, 'Delivery rider updated');
   } catch (err) { next(err); }
@@ -941,7 +941,7 @@ const assignRiderToOrder = async (req, res, next) => {
     if (rider_id) {
       const [rider] = await query(`SELECT name, email FROM DeliveryRiders WHERE id = ?`, [rider_id]);
       const [order] = await query(`SELECT order_number, delivery_address FROM Orders WHERE id = ?`, [orderId]);
-      
+
       await query(
         `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
          SELECT ?, status, CONCAT('Rider assigned: ', ?), ?, 'admin' FROM Orders WHERE id = ?`,
@@ -1071,7 +1071,7 @@ const acceptRejectOrder = async (req, res, next) => {
         await notifyUser(orderRow.user_id, 'Order Rejected',
           `Sorry, your order ${orderRow.order_number} was rejected. Reason: ${cancelReason}`,
           'order', { order_id: orderRow.id, order_number: orderRow.order_number, status: 'cancelled' });
-        
+
         // Email notification
         if (orderRow.user_email) {
           await sendOrderStatusEmail(orderRow.user_email, orderRow.order_number, 'cancelled');
@@ -1085,7 +1085,7 @@ const acceptRejectOrder = async (req, res, next) => {
 // ── Reviews / Feedback ────────────────────────────────────────────
 const adminGetReviews = async (req, res, next) => {
   try {
-    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
     const { min_rating, max_rating, location_id } = req.query;
@@ -1094,9 +1094,9 @@ const adminGetReviews = async (req, res, next) => {
       : req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
-    if (lid)         { where += ' AND o.location_id = ?';        params.push(lid); }
-    if (min_rating)  { where += ' AND f.overall_rating >= ?';    params.push(parseInt(min_rating)); }
-    if (max_rating)  { where += ' AND f.overall_rating <= ?';    params.push(parseInt(max_rating)); }
+    if (lid) { where += ' AND o.location_id = ?'; params.push(lid); }
+    if (min_rating) { where += ' AND f.overall_rating >= ?'; params.push(parseInt(min_rating)); }
+    if (max_rating) { where += ' AND f.overall_rating <= ?'; params.push(parseInt(max_rating)); }
     const [countRes, rows] = await Promise.all([
       query(`SELECT COUNT(*) as total FROM OrderFeedback f JOIN Orders o ON f.order_id = o.id ${where}`, params),
       query(
@@ -1125,7 +1125,7 @@ const getAdminNotifications = async (req, res, next) => {
     const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
       ? (location_id ? parseInt(location_id) : null)
       : req.admin.location_id;
-    
+
     let where = 'WHERE 1=1';
     const params = [];
     if (lid) {

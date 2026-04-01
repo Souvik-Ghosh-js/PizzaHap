@@ -44,7 +44,7 @@ const calculateOrder = async (req, res, next) => {
     }
     subtotal = parseFloat(subtotal.toFixed(2));
 
-    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
+    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 0 : 0); //changed here delivery fee
     let discount_amount = 0, coupon = null;
 
     if (coupon_code) {
@@ -143,7 +143,7 @@ const placeOrder = async (req, res, next) => {
     }
 
     subtotal = parseFloat(subtotal.toFixed(2));
-    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
+    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 0 : 0); //changed here delivery fee
     let discount_amount = 0, couponId = null;
 
     if (coupon_code) {
