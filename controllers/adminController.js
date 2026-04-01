@@ -307,7 +307,7 @@ const adminPlaceOrder = async (req, res, next) => {
     }
 
     subtotal = parseFloat(subtotal.toFixed(2));
-    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 0 : 0);//changed here delivery fee
+    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);//changed here delivery fee
 
     // ── Coupon discount ───────────────────────────────────────────
     let discount_amount = 0;
