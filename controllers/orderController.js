@@ -192,7 +192,7 @@ const placeOrderDirect = async (userId, orderData) => {
          delivery_address, delivery_latitude, delivery_longitude,
          subtotal, discount_amount, delivery_fee, tax_amount, total_amount,
          coupon_id, special_instructions, payment_status, payment_method, coins_redeemed)
-       VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,'pending',?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?)`,
       [
         order_number, userId, location_id, delivery_type,
         delivery_address || null, delivery_latitude || null, delivery_longitude || null,
