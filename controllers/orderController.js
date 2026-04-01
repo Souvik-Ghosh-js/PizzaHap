@@ -103,10 +103,14 @@ const placeOrder = async (req, res, next) => {
       items, location_id, delivery_type = 'delivery',
       delivery_address, delivery_latitude, delivery_longitude,
       coupon_code, special_instructions,
-      payment_method = 'online',
+      payment_method,
       coins_to_redeem = 0,
     } = req.body;
     const userId = req.user.id;
+
+    if (payment_method === 'online') {
+      return badRequest(res, 'Online payments must use /payments/initiate');
+    }
 
     let subtotal = 0;
     const orderItems = [];
