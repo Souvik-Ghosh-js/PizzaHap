@@ -85,10 +85,11 @@ const checkGeofence = async (req, res, next) => {
       const polygon = typeof gf.polygon_coordinates === 'string'
         ? JSON.parse(gf.polygon_coordinates) : gf.polygon_coordinates;
       if (pointInPolygon(lat, lng, polygon)) {
-        return success(res, { inside: true, location_id: gf.location_id, name: gf.name, address: gf.address });
+        const fullLoc = await query(`SELECT * FROM Locations WHERE id = ?`, [gf.location_id]);
+        return success(res, { inside: true, location: fullLoc[0] });
       }
     }
-    return success(res, { inside: false, location_id: null });
+    return success(res, { inside: false, location: null });
   } catch (err) { next(err); }
 };
 

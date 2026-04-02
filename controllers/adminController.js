@@ -1320,11 +1320,12 @@ const setLocationPricing = async (req, res, next) => {
 
 const deleteLocationPricing = async (req, res, next) => {
   try {
-    const { type } = req.query;
-    const id = req.params.id;
-    if (type === 'size') await query(`DELETE FROM ProductLocationPricing WHERE id = ?`, [id]);
-    else if (type === 'crust') await query(`DELETE FROM CrustLocationPricing WHERE id = ?`, [id]);
-    else if (type === 'topping') await query(`DELETE FROM ToppingLocationPricing WHERE id = ?`, [id]);
+    const { type, location_id } = req.query;
+    const item_id = req.params.id;
+    if (!type || !location_id) return badRequest(res, 'type and location_id query params required');
+    if (type === 'size') await query(`DELETE FROM ProductLocationPricing WHERE product_size_id = ? AND location_id = ?`, [item_id, location_id]);
+    else if (type === 'crust') await query(`DELETE FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`, [item_id, location_id]);
+    else if (type === 'topping') await query(`DELETE FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`, [item_id, location_id]);
     else return badRequest(res, 'type query param required (size, crust, or topping)');
     return success(res, {}, 'Location pricing removed');
   } catch (err) { next(err); }

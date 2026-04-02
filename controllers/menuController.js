@@ -26,8 +26,8 @@ const getProducts = async (req, res, next) => {
     }
 
     let joinClause = '';
+    const lid = location_id ? parseInt(location_id) : 'NULL';
     if (location_id) {
-      const lid = parseInt(location_id);
       joinClause = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${lid}`;
       where += ` AND (pla.is_available IS NULL OR pla.is_available = 1)`;
     }
@@ -35,7 +35,13 @@ const getProducts = async (req, res, next) => {
     const countRes = await query(`SELECT COUNT(*) as total FROM Products p ${joinClause} ${where}`, params);
     const rows = await query(
       `SELECT p.*, c.name as category_name, c.has_toppings, c.has_crust,
-              COALESCE(pla.is_available, 1) as location_available
+              COALESCE(pla.is_available, 1) as location_available,
+              (
+                SELECT COALESCE(MIN(COALESCE(plp.price, ps.price)), p.base_price)
+                FROM ProductSizes ps
+                LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ${lid}
+                WHERE ps.product_id = p.id AND ps.is_available = 1
+              ) as min_price
        FROM Products p
        LEFT JOIN Categories c ON p.category_id = c.id
        ${joinClause}
@@ -44,7 +50,13 @@ const getProducts = async (req, res, next) => {
        LIMIT ${limit} OFFSET ${offset}`,
       params
     );
-    return paginated(res, rows, countRes[0].total, page, limit);
+    
+    const processedRows = rows.map(r => ({
+      ...r,
+      base_price: r.min_price !== null ? r.min_price : r.base_price
+    }));
+    
+    return paginated(res, processedRows, countRes[0].total, page, limit);
   } catch (err) { next(err); }
 };
 
@@ -115,19 +127,31 @@ const getFeaturedProducts = async (req, res, next) => {
   try {
     const { location_id } = req.query;
     let joinClause = '', whereExtra = '';
+    const lid = location_id ? parseInt(location_id) : 'NULL';
     if (location_id) {
-      const lid = parseInt(location_id);
       joinClause = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${lid}`;
       whereExtra = ` AND (pla.is_available IS NULL OR pla.is_available = 1)`;
     }
     const rows = await query(
-      `SELECT p.*, c.name as category_name, c.has_toppings, c.has_crust
+      `SELECT p.*, c.name as category_name, c.has_toppings, c.has_crust,
+              (
+                SELECT COALESCE(MIN(COALESCE(plp.price, ps.price)), p.base_price)
+                FROM ProductSizes ps
+                LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ${lid}
+                WHERE ps.product_id = p.id AND ps.is_available = 1
+              ) as min_price
        FROM Products p LEFT JOIN Categories c ON p.category_id = c.id
        ${joinClause}
        WHERE p.is_featured = 1 AND p.is_available = 1${whereExtra}
        ORDER BY p.sort_order LIMIT 10`
     );
-    return success(res, rows);
+    
+    const processedRows = rows.map(r => ({
+      ...r,
+      base_price: r.min_price !== null ? r.min_price : r.base_price
+    }));
+    
+    return success(res, processedRows);
   } catch (err) { next(err); }
 };
 
