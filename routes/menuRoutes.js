@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { getCategories, getProducts, getProductById, getFeaturedProducts, getToppings, getCrusts } = require('../controllers/menuController');
+const { getCategories, getProducts, getProductById, getFeaturedProducts, getToppings, getCrusts, getActiveBanners } = require('../controllers/menuController');
 
+router.get('/banners', getActiveBanners);
 router.get('/categories', getCategories);
 router.get('/products', getProducts);
 router.get('/products/featured', getFeaturedProducts);

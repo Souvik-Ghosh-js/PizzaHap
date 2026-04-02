@@ -1,5 +1,5 @@
 const { query } = require('../config/db');
-const { success, notFound } = require('../utils/response');
+const { success, notFound, badRequest } = require('../utils/response');
 
 const haversineDistance = (lat1, lon1, lat2, lon2) => {
   const R = 6371;
@@ -56,4 +56,40 @@ const getLocationById = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getAllLocations, getNearestLocation, getLocationById };
+// ── Point-in-polygon (ray-casting) ───────────────────────────────
+const pointInPolygon = (lat, lng, polygon) => {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lat, yi = polygon[i].lng;
+    const xj = polygon[j].lat, yj = polygon[j].lng;
+    const intersect = ((yi > lng) !== (yj > lng)) &&
+      (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+};
+
+const checkGeofence = async (req, res, next) => {
+  try {
+    const { latitude, longitude } = req.query;
+    if (!latitude || !longitude) return badRequest(res, 'latitude and longitude are required');
+    const lat = parseFloat(latitude), lng = parseFloat(longitude);
+
+    const geofences = await query(
+      `SELECT lg.location_id, lg.polygon_coordinates, l.name, l.address
+       FROM LocationGeofences lg
+       JOIN Locations l ON l.id = lg.location_id AND l.is_active = 1`
+    );
+
+    for (const gf of geofences) {
+      const polygon = typeof gf.polygon_coordinates === 'string'
+        ? JSON.parse(gf.polygon_coordinates) : gf.polygon_coordinates;
+      if (pointInPolygon(lat, lng, polygon)) {
+        return success(res, { inside: true, location_id: gf.location_id, name: gf.name, address: gf.address });
+      }
+    }
+    return success(res, { inside: false, location_id: null });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getAllLocations, getNearestLocation, getLocationById, checkGeofence };

@@ -1179,6 +1179,157 @@ const sendNotificationToUsers = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Banners CRUD ─────────────────────────────────────────────────
+const adminGetBanners = async (req, res, next) => {
+  try {
+    const rows = await query(`SELECT * FROM Banners ORDER BY sort_order, id`);
+    return success(res, rows);
+  } catch (err) { next(err); }
+};
+
+const createBanner = async (req, res, next) => {
+  try {
+    const { badge_text, title_text, gradient_start, gradient_end, icon_name, sort_order, is_active, valid_from, valid_until } = req.body;
+    const r = await query(
+      `INSERT INTO Banners (badge_text, title_text, gradient_start, gradient_end, icon_name, sort_order, is_active, valid_from, valid_until)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      [badge_text, title_text, gradient_start || '#991515', gradient_end || '#FF6B35',
+       icon_name || 'local_offer', sort_order || 0, is_active != null ? (is_active ? 1 : 0) : 1,
+       valid_from || null, valid_until || null]
+    );
+    return created(res, { banner_id: r.insertId }, 'Banner created');
+  } catch (err) { next(err); }
+};
+
+const updateBanner = async (req, res, next) => {
+  try {
+    const { badge_text, title_text, gradient_start, gradient_end, icon_name, sort_order, is_active, valid_from, valid_until } = req.body;
+    await query(
+      `UPDATE Banners SET
+         badge_text     = IFNULL(?,badge_text),
+         title_text     = IFNULL(?,title_text),
+         gradient_start = IFNULL(?,gradient_start),
+         gradient_end   = IFNULL(?,gradient_end),
+         icon_name      = IFNULL(?,icon_name),
+         sort_order     = IFNULL(?,sort_order),
+         is_active      = IFNULL(?,is_active),
+         valid_from     = ?,
+         valid_until    = ?
+       WHERE id = ?`,
+      [badge_text || null, title_text || null, gradient_start || null, gradient_end || null,
+       icon_name || null, sort_order != null ? sort_order : null,
+       is_active != null ? (is_active ? 1 : 0) : null,
+       valid_from || null, valid_until || null, req.params.id]
+    );
+    return success(res, {}, 'Banner updated');
+  } catch (err) { next(err); }
+};
+
+const deleteBanner = async (req, res, next) => {
+  try {
+    await query(`DELETE FROM Banners WHERE id = ?`, [req.params.id]);
+    return success(res, {}, 'Banner deleted');
+  } catch (err) { next(err); }
+};
+
+// ── Location Geofences ───────────────────────────────────────────
+const getLocationGeofence = async (req, res, next) => {
+  try {
+    const rows = await query(`SELECT * FROM LocationGeofences WHERE location_id = ?`, [req.params.id]);
+    return success(res, rows.length ? rows[0] : null);
+  } catch (err) { next(err); }
+};
+
+const saveLocationGeofence = async (req, res, next) => {
+  try {
+    const { polygon_coordinates } = req.body;
+    if (!polygon_coordinates || !Array.isArray(polygon_coordinates) || polygon_coordinates.length < 3) {
+      return badRequest(res, 'At least 3 polygon points required');
+    }
+    await query(
+      `INSERT INTO LocationGeofences (location_id, polygon_coordinates)
+       VALUES (?, ?) ON DUPLICATE KEY UPDATE polygon_coordinates = VALUES(polygon_coordinates)`,
+      [req.params.id, JSON.stringify(polygon_coordinates)]
+    );
+    return success(res, {}, 'Geofence saved');
+  } catch (err) { next(err); }
+};
+
+// ── Location Pricing ─────────────────────────────────────────────
+const getLocationPricing = async (req, res, next) => {
+  try {
+    const locationId = parseInt(req.params.locationId);
+    const [sizePricing, crustPricing, toppingPricing] = await Promise.all([
+      query(
+        `SELECT plp.*, ps.size_name, ps.price as default_price, p.name as product_name
+         FROM ProductLocationPricing plp
+         JOIN ProductSizes ps ON ps.id = plp.product_size_id
+         JOIN Products p ON p.id = ps.product_id
+         WHERE plp.location_id = ?
+         ORDER BY p.name, ps.size_name`, [locationId]
+      ),
+      query(
+        `SELECT clp.*, ct.name as crust_name, ct.extra_price as default_extra_price
+         FROM CrustLocationPricing clp
+         JOIN CrustTypes ct ON ct.id = clp.crust_id
+         WHERE clp.location_id = ?
+         ORDER BY ct.name`, [locationId]
+      ),
+      query(
+        `SELECT tlp.*, t.name as topping_name, t.price as default_price
+         FROM ToppingLocationPricing tlp
+         JOIN Toppings t ON t.id = tlp.topping_id
+         WHERE tlp.location_id = ?
+         ORDER BY t.name`, [locationId]
+      ),
+    ]);
+    return success(res, { sizes: sizePricing, crusts: crustPricing, toppings: toppingPricing });
+  } catch (err) { next(err); }
+};
+
+const setLocationPricing = async (req, res, next) => {
+  try {
+    const { type, item_id, location_id, price } = req.body;
+    if (!type || !item_id || !location_id || price == null) {
+      return badRequest(res, 'type, item_id, location_id, and price are required');
+    }
+    if (type === 'size') {
+      await query(
+        `INSERT INTO ProductLocationPricing (product_size_id, location_id, price) VALUES (?,?,?)
+         ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+        [item_id, location_id, price]
+      );
+    } else if (type === 'crust') {
+      await query(
+        `INSERT INTO CrustLocationPricing (crust_id, location_id, extra_price) VALUES (?,?,?)
+         ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+        [item_id, location_id, price]
+      );
+    } else if (type === 'topping') {
+      await query(
+        `INSERT INTO ToppingLocationPricing (topping_id, location_id, price) VALUES (?,?,?)
+         ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+        [item_id, location_id, price]
+      );
+    } else {
+      return badRequest(res, 'type must be size, crust, or topping');
+    }
+    return success(res, {}, 'Location pricing saved');
+  } catch (err) { next(err); }
+};
+
+const deleteLocationPricing = async (req, res, next) => {
+  try {
+    const { type } = req.query;
+    const id = req.params.id;
+    if (type === 'size') await query(`DELETE FROM ProductLocationPricing WHERE id = ?`, [id]);
+    else if (type === 'crust') await query(`DELETE FROM CrustLocationPricing WHERE id = ?`, [id]);
+    else if (type === 'topping') await query(`DELETE FROM ToppingLocationPricing WHERE id = ?`, [id]);
+    else return badRequest(res, 'type query param required (size, crust, or topping)');
+    return success(res, {}, 'Location pricing removed');
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   adminLogin, getDashboard, getReports,
   adminGetOrders, adminGetOrderDetail, updateOrderStatus, updatePaymentStatus, adminPlaceOrder,
@@ -1196,4 +1347,7 @@ module.exports = {
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
   sendNotificationToUsers,
   adminGetReviews,
+  adminGetBanners, createBanner, updateBanner, deleteBanner,
+  getLocationGeofence, saveLocationGeofence,
+  getLocationPricing, setLocationPricing, deleteLocationPricing,
 };

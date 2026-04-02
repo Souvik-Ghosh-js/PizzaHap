@@ -56,6 +56,7 @@ const validateAndComputeOrder = async (body, userId) => {
   let subtotal = 0;
   const orderItems = [];
 
+  const locId = location_id ? parseInt(location_id) : null;
   for (const item of items) {
     const productResult = await query(
       `SELECT p.*, ps.price as size_price, ps.size_name,
@@ -73,12 +74,43 @@ const validateAndComputeOrder = async (body, userId) => {
       throw { status: 400, message: `Insufficient stock for ${product.name}. Available: ${product.stock_quantity}` };
     }
 
-    let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
+    // Size price with location override
+    let sizePrice = parseFloat(product.size_price);
+    if (locId) {
+      const locSizePrice = await query(
+        `SELECT price FROM ProductLocationPricing WHERE product_size_id = ? AND location_id = ?`,
+        [item.size_id, locId]
+      );
+      if (locSizePrice.length) sizePrice = parseFloat(locSizePrice[0].price);
+    }
+
+    // Crust price with location override
+    let crustPrice = parseFloat(product.crust_extra || 0);
+    if (item.crust_id && locId) {
+      const locCrustPrice = await query(
+        `SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`,
+        [item.crust_id, locId]
+      );
+      if (locCrustPrice.length) crustPrice = parseFloat(locCrustPrice[0].extra_price);
+    }
+
+    let itemPrice = sizePrice + crustPrice;
     const itemToppings = [];
     if (item.toppings?.length) {
       for (const tid of item.toppings) {
         const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-        if (tr.length) { itemPrice += parseFloat(tr[0].price); itemToppings.push(tr[0]); }
+        if (tr.length) {
+          let tPrice = parseFloat(tr[0].price);
+          if (locId) {
+            const locTopPrice = await query(
+              `SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`,
+              [tid, locId]
+            );
+            if (locTopPrice.length) tPrice = parseFloat(locTopPrice[0].price);
+          }
+          itemPrice += tPrice;
+          itemToppings.push(tr[0]);
+        }
       }
     }
     const total_price = parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));

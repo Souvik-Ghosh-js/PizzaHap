@@ -68,16 +68,34 @@ const getProductById = async (req, res, next) => {
       if (avail.length && !avail[0].is_available) return notFound(res, 'Product not available at this location');
     }
 
-    const sizesPromise   = query(`SELECT * FROM ProductSizes WHERE product_id = ? AND is_available = 1`, [product.id]);
+    const lid = location_id ? parseInt(location_id) : null;
+
+    const sizesPromise = lid
+      ? query(
+          `SELECT ps.*, COALESCE(plp.price, ps.price) as effective_price
+           FROM ProductSizes ps
+           LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ?
+           WHERE ps.product_id = ? AND ps.is_available = 1`,
+          [lid, product.id])
+      : query(`SELECT *, price as effective_price FROM ProductSizes WHERE product_id = ? AND is_available = 1`, [product.id]);
+
     const ratingsPromise = query(
       `SELECT r.*, u.name as user_name FROM Ratings r LEFT JOIN Users u ON r.user_id = u.id
        WHERE r.product_id = ? AND r.is_approved = 1 ORDER BY r.created_at DESC`,
       [product.id]
     );
 
-    // Only fetch crusts/toppings if the category has them enabled
-    const crustsPromise  = product.has_crust    ? query(`SELECT * FROM CrustTypes WHERE is_available = 1 ORDER BY sort_order`) : Promise.resolve([]);
-    const toppingsPromise= product.has_toppings ? query(`SELECT * FROM Toppings   WHERE is_available = 1 ORDER BY sort_order`) : Promise.resolve([]);
+    // Only fetch crusts/toppings if the category has them enabled, with location pricing
+    const crustsPromise = product.has_crust
+      ? (lid
+          ? query(`SELECT ct.*, COALESCE(clp.extra_price, ct.extra_price) as effective_extra_price FROM CrustTypes ct LEFT JOIN CrustLocationPricing clp ON clp.crust_id = ct.id AND clp.location_id = ? WHERE ct.is_available = 1 ORDER BY ct.sort_order`, [lid])
+          : query(`SELECT *, extra_price as effective_extra_price FROM CrustTypes WHERE is_available = 1 ORDER BY sort_order`))
+      : Promise.resolve([]);
+    const toppingsPromise = product.has_toppings
+      ? (lid
+          ? query(`SELECT t.*, COALESCE(tlp.price, t.price) as effective_price FROM Toppings t LEFT JOIN ToppingLocationPricing tlp ON tlp.topping_id = t.id AND tlp.location_id = ? WHERE t.is_available = 1 ORDER BY t.sort_order`, [lid])
+          : query(`SELECT *, price as effective_price FROM Toppings WHERE is_available = 1 ORDER BY sort_order`))
+      : Promise.resolve([]);
 
     const [sizes, crusts, toppings, ratings] = await Promise.all([sizesPromise, crustsPromise, toppingsPromise, ratingsPromise]);
 
@@ -131,4 +149,16 @@ const getCrusts = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getCategories, getProducts, getProductById, getFeaturedProducts, getToppings, getCrusts };
+const getActiveBanners = async (req, res, next) => {
+  try {
+    const rows = await query(
+      `SELECT * FROM Banners WHERE is_active = 1
+       AND (valid_from IS NULL OR valid_from <= NOW())
+       AND (valid_until IS NULL OR valid_until >= NOW())
+       ORDER BY sort_order, id`
+    );
+    return success(res, rows);
+  } catch (err) { next(err); }
+};
+
+module.exports = { getCategories, getProducts, getProductById, getFeaturedProducts, getToppings, getCrusts, getActiveBanners };

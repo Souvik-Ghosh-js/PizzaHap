@@ -20,6 +20,9 @@ const {
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
   sendNotificationToUsers,
   adminGetReviews,
+  adminGetBanners, createBanner, updateBanner, deleteBanner,
+  getLocationGeofence, saveLocationGeofence,
+  getLocationPricing, setLocationPricing, deleteLocationPricing,
 } = require('../controllers/adminController');
 const { getAllRefunds, processRefund } = require('../controllers/refundController');
 const { adminGetAllTickets, adminReplyTicket } = require('../controllers/supportController');
@@ -186,5 +189,28 @@ router.post('/support/tickets/:id/reply', [body('message').trim().notEmpty()], v
 
 // ── Reviews ─────────────────────────────────────────────────
 router.get('/reviews', adminGetReviews);
+
+// ── Banners ──────────────────────────────────────────────────────
+router.get('/banners', adminGetBanners);
+router.post('/banners', requireRole('super_admin', 'admin'), [
+  body('badge_text').trim().notEmpty(),
+  body('title_text').trim().notEmpty(),
+], validate, createBanner);
+router.put('/banners/:id', requireRole('super_admin', 'admin'), updateBanner);
+router.delete('/banners/:id', requireRole('super_admin', 'admin'), deleteBanner);
+
+// ── Location Geofences ───────────────────────────────────────────
+router.get('/locations/:id/geofence', getLocationGeofence);
+router.put('/locations/:id/geofence', requireRole('super_admin'), saveLocationGeofence);
+
+// ── Location Pricing ─────────────────────────────────────────────
+router.get('/pricing/:locationId', getLocationPricing);
+router.post('/pricing', requireRole('super_admin', 'admin'), [
+  body('type').isIn(['size', 'crust', 'topping']),
+  body('item_id').isInt(),
+  body('location_id').isInt(),
+  body('price').isNumeric(),
+], validate, setLocationPricing);
+router.delete('/pricing/:id', requireRole('super_admin', 'admin'), deleteLocationPricing);
 
 module.exports = router;

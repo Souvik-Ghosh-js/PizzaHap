@@ -9,21 +9,50 @@ const generateOrderNumber = () => {
 };
 
 // ── Helper: build price for a single item ─────────────────────────
-const buildItemPrice = async (item) => {
+const buildItemPrice = async (item, location_id) => {
   const sizeResult = await query(
     `SELECT price FROM ProductSizes WHERE id = ? AND is_available = 1`, [item.size_id]
   );
   if (!sizeResult.length) throw new Error(`Invalid or unavailable size`);
   let itemPrice = parseFloat(sizeResult[0].price);
 
+  // Check location-specific size price override
+  if (location_id) {
+    const locPrice = await query(
+      `SELECT price FROM ProductLocationPricing WHERE product_size_id = ? AND location_id = ?`,
+      [item.size_id, location_id]
+    );
+    if (locPrice.length) itemPrice = parseFloat(locPrice[0].price);
+  }
+
   if (item.crust_id) {
     const cr = await query(`SELECT extra_price FROM CrustTypes WHERE id = ? AND is_available = 1`, [item.crust_id]);
-    if (cr.length) itemPrice += parseFloat(cr[0].extra_price);
+    if (cr.length) {
+      let crustPrice = parseFloat(cr[0].extra_price);
+      if (location_id) {
+        const locCrust = await query(
+          `SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`,
+          [item.crust_id, location_id]
+        );
+        if (locCrust.length) crustPrice = parseFloat(locCrust[0].extra_price);
+      }
+      itemPrice += crustPrice;
+    }
   }
   if (item.toppings?.length) {
     for (const tid of item.toppings) {
       const tr = await query(`SELECT price FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-      if (tr.length) itemPrice += parseFloat(tr[0].price);
+      if (tr.length) {
+        let tPrice = parseFloat(tr[0].price);
+        if (location_id) {
+          const locTop = await query(
+            `SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`,
+            [tid, location_id]
+          );
+          if (locTop.length) tPrice = parseFloat(locTop[0].price);
+        }
+        itemPrice += tPrice;
+      }
     }
   }
   return itemPrice;
@@ -32,13 +61,13 @@ const buildItemPrice = async (item) => {
 // ── Calculate order totals (preview) ─────────────────────────────
 const calculateOrder = async (req, res, next) => {
   try {
-    const { items, coupon_code, delivery_type = 'delivery', coins_to_redeem = 0 } = req.body;
+    const { items, coupon_code, delivery_type = 'delivery', coins_to_redeem = 0, location_id } = req.body;
     let subtotal = 0;
 
     // Build prices once — reused for BOGO filtering
     const itemPriceMap = [];
     for (const item of items) {
-      const price = await buildItemPrice(item);
+      const price = await buildItemPrice(item, location_id ? parseInt(location_id) : null);
       itemPriceMap.push({ product_id: item.product_id, price });
       subtotal += price * (item.quantity || 1);
     }
@@ -115,6 +144,7 @@ const placeOrder = async (req, res, next) => {
     let subtotal = 0;
     const orderItems = [];
 
+    const locId = location_id ? parseInt(location_id) : null;
     for (const item of items) {
       const productResult = await query(
         `SELECT p.*, ps.price as size_price, ps.size_name,
@@ -133,12 +163,43 @@ const placeOrder = async (req, res, next) => {
         return badRequest(res, `Insufficient stock for ${product.name}. Available: ${product.stock_quantity}`);
       }
 
-      let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
+      // Size price with location override
+      let sizePrice = parseFloat(product.size_price);
+      if (locId) {
+        const locSizePrice = await query(
+          `SELECT price FROM ProductLocationPricing WHERE product_size_id = ? AND location_id = ?`,
+          [item.size_id, locId]
+        );
+        if (locSizePrice.length) sizePrice = parseFloat(locSizePrice[0].price);
+      }
+
+      // Crust price with location override
+      let crustPrice = parseFloat(product.crust_extra || 0);
+      if (item.crust_id && locId) {
+        const locCrustPrice = await query(
+          `SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`,
+          [item.crust_id, locId]
+        );
+        if (locCrustPrice.length) crustPrice = parseFloat(locCrustPrice[0].extra_price);
+      }
+
+      let itemPrice = sizePrice + crustPrice;
       const itemToppings = [];
       if (item.toppings?.length) {
         for (const tid of item.toppings) {
           const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-          if (tr.length) { itemPrice += parseFloat(tr[0].price); itemToppings.push(tr[0]); }
+          if (tr.length) {
+            let tPrice = parseFloat(tr[0].price);
+            if (locId) {
+              const locTopPrice = await query(
+                `SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`,
+                [tid, locId]
+              );
+              if (locTopPrice.length) tPrice = parseFloat(locTopPrice[0].price);
+            }
+            itemPrice += tPrice;
+            itemToppings.push(tr[0]);
+          }
         }
       }
       const total_price = parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));
