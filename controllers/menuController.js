@@ -25,17 +25,12 @@ const getProducts = async (req, res, next) => {
       params.push(`%${search}%`, `%${search}%`);
     }
 
-    let joinClause = '';
     const lid = location_id ? parseInt(location_id) : 'NULL';
-    if (location_id) {
-      joinClause = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${lid}`;
-      where += ` AND (pla.is_available IS NULL OR pla.is_available = 1)`;
-    }
 
-    const countRes = await query(`SELECT COUNT(*) as total FROM Products p ${joinClause} ${where}`, params);
+    const countRes = await query(`SELECT COUNT(*) as total FROM Products p ${where}`, params);
     const rows = await query(
       `SELECT p.*, c.name as category_name, c.has_toppings, c.has_crust,
-              COALESCE(pla.is_available, 1) as location_available,
+              1 as location_available,
               (
                 SELECT COALESCE(MIN(COALESCE(plp.price, ps.price)), p.base_price)
                 FROM ProductSizes ps
@@ -44,7 +39,6 @@ const getProducts = async (req, res, next) => {
               ) as min_price
        FROM Products p
        LEFT JOIN Categories c ON p.category_id = c.id
-       ${joinClause}
        ${where}
        ORDER BY p.sort_order, p.name
        LIMIT ${limit} OFFSET ${offset}`,
@@ -73,11 +67,7 @@ const getProductById = async (req, res, next) => {
     const product = rows[0];
 
     if (location_id) {
-      const avail = await query(
-        `SELECT is_available FROM ProductLocationAvailability WHERE product_id = ? AND location_id = ?`,
-        [product.id, parseInt(location_id)]
-      );
-      if (avail.length && !avail[0].is_available) return notFound(res, 'Product not available at this location');
+      // Products are available globally
     }
 
     const lid = location_id ? parseInt(location_id) : null;
@@ -126,23 +116,18 @@ const getProductById = async (req, res, next) => {
 const getFeaturedProducts = async (req, res, next) => {
   try {
     const { location_id } = req.query;
-    let joinClause = '', whereExtra = '';
-    const lid = location_id ? parseInt(location_id) : 'NULL';
-    if (location_id) {
-      joinClause = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${lid}`;
-      whereExtra = ` AND (pla.is_available IS NULL OR pla.is_available = 1)`;
-    }
+    const lid = location_id ? parseInt(location_id) : null;
+    const lidSql = lid !== null ? lid : 'NULL';
     const rows = await query(
       `SELECT p.*, c.name as category_name, c.has_toppings, c.has_crust,
               (
                 SELECT COALESCE(MIN(COALESCE(plp.price, ps.price)), p.base_price)
                 FROM ProductSizes ps
-                LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ${lid}
+                LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ${lidSql}
                 WHERE ps.product_id = p.id AND ps.is_available = 1
               ) as min_price
        FROM Products p LEFT JOIN Categories c ON p.category_id = c.id
-       ${joinClause}
-       WHERE p.is_featured = 1 AND p.is_available = 1${whereExtra}
+       WHERE p.is_featured = 1 AND p.is_available = 1
        ORDER BY p.sort_order LIMIT 10`
     );
     

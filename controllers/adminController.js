@@ -243,25 +243,28 @@ const adminPlaceOrder = async (req, res, next) => {
 
       // Handle products with sizes vs without sizes
       if (item.size_id) {
-        // Product has a size - use the size price
+        // Product has a size - use location-aware pricing
         productResult = await query(
-          `SELECT p.*, ps.price as size_price, ps.size_name,
-                  ct.extra_price as crust_extra, ct.name as crust_name
+          `SELECT p.*, COALESCE(plp.price, ps.price) as size_price, ps.size_name,
+                  COALESCE(clp.extra_price, ct.extra_price) as crust_extra, ct.name as crust_name
            FROM Products p
            JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
+           LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ?
            LEFT JOIN CrustTypes ct ON ct.id = ?
+           LEFT JOIN CrustLocationPricing clp ON clp.crust_id = ct.id AND clp.location_id = ?
            WHERE p.id = ? AND p.is_available = 1`,
-          [item.size_id, item.crust_id || null, item.product_id]
+          [item.size_id, resolvedLocationId, item.crust_id || null, resolvedLocationId, item.product_id]
         );
       } else {
         // Product doesn't have sizes - use base_price
         productResult = await query(
           `SELECT p.*, p.base_price as size_price, NULL as size_name,
-                  ct.extra_price as crust_extra, ct.name as crust_name
+                  COALESCE(clp.extra_price, ct.extra_price) as crust_extra, ct.name as crust_name
            FROM Products p
            LEFT JOIN CrustTypes ct ON ct.id = ?
+           LEFT JOIN CrustLocationPricing clp ON clp.crust_id = ct.id AND clp.location_id = ?
            WHERE p.id = ? AND p.is_available = 1`,
-          [item.crust_id || null, item.product_id]
+          [item.crust_id || null, resolvedLocationId, item.product_id]
         );
       }
 
@@ -286,10 +289,16 @@ const adminPlaceOrder = async (req, res, next) => {
 
       if (item.toppings?.length) {
         for (const tid of item.toppings) {
-          const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
+          const tr = await query(
+            `SELECT t.*, COALESCE(tlp.price, t.price) as effective_price
+             FROM Toppings t
+             LEFT JOIN ToppingLocationPricing tlp ON tlp.topping_id = t.id AND tlp.location_id = ?
+             WHERE t.id = ? AND t.is_available = 1`,
+            [resolvedLocationId, tid]
+          );
           if (tr.length) {
-            itemPrice += parseFloat(tr[0].price);
-            itemToppings.push(tr[0]);
+            itemPrice += parseFloat(tr[0].effective_price);
+            itemToppings.push({ ...tr[0], price: tr[0].effective_price });
           }
         }
       }
@@ -554,25 +563,35 @@ const adminGetProducts = async (req, res, next) => {
     if (show_unavailable !== 'true') { where += ` AND p.is_available = 1`; }
     if (category_id) { where += ` AND p.category_id = ?`; params.push(parseInt(category_id)); }
     if (search) { where += ` AND (p.name LIKE ? OR p.description LIKE ?)`; params.push(`%${search}%`, `%${search}%`); }
-    let locSelect = '', locJoin = '';
-    if (lid) {
-      locJoin = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${parseInt(lid)}`;
-      locSelect = `, COALESCE(pla.is_available, 1) as location_available`;
-    }
+
+    const lidSql = lid ? parseInt(lid) : 'NULL';
+    const locPriceSelect = `,
+              (
+                SELECT COALESCE(MIN(COALESCE(plp.price, ps.price)), p.base_price)
+                FROM ProductSizes ps
+                LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ${lidSql}
+                WHERE ps.product_id = p.id AND ps.is_available = 1
+              ) as min_price`;
+
     const [countRes, rows] = await Promise.all([
-      query(`SELECT COUNT(*) as total FROM Products p ${locJoin} ${where}`, params),
+      query(`SELECT COUNT(*) as total FROM Products p ${where}`, params),
       query(
-        `SELECT p.*, c.name as category_name${locSelect}
+        `SELECT p.*, c.name as category_name, 1 as location_available${locPriceSelect}
          FROM Products p
          LEFT JOIN Categories c ON p.category_id = c.id
-         ${locJoin}
          ${where}
          ORDER BY p.category_id, p.sort_order, p.name
          LIMIT ${limit} OFFSET ${offset}`,
         params
       ),
     ]);
-    return paginated(res, rows, countRes[0].total, page, limit);
+
+    const processedRows = rows.map(r => ({
+      ...r,
+      base_price: r.min_price !== null ? r.min_price : r.base_price
+    }));
+
+    return paginated(res, processedRows, countRes[0].total, page, limit);
   } catch (err) { next(err); }
 };
 
@@ -682,7 +701,18 @@ const getProductAvailabilityMatrix = async (req, res, next) => {
 // ── Product Sizes CRUD ────────────────────────────────────────────
 const adminGetProductSizes = async (req, res, next) => {
   try {
-    const rows = await query(`SELECT * FROM ProductSizes WHERE product_id = ? ORDER BY price`, [req.params.id]);
+    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    if (lid) {
+      const rows = await query(
+        `SELECT ps.*, COALESCE(plp.price, ps.price) as price, COALESCE(plp.price, ps.price) as effective_price
+         FROM ProductSizes ps
+         LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ?
+         WHERE ps.product_id = ? ORDER BY ps.price`,
+        [lid, req.params.id]
+      );
+      return success(res, rows);
+    }
+    const rows = await query(`SELECT *, price as effective_price FROM ProductSizes WHERE product_id = ? ORDER BY price`, [req.params.id]);
     return success(res, rows);
   } catch (err) { next(err); }
 };
