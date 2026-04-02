@@ -759,7 +759,18 @@ const deleteProductSize = async (req, res, next) => {
 // ── Toppings CRUD ─────────────────────────────────────────────────
 const adminGetToppings = async (req, res, next) => {
   try {
-    const rows = await query(`SELECT * FROM Toppings ORDER BY sort_order, name`);
+    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    if (lid) {
+      const rows = await query(
+        `SELECT t.*, COALESCE(tlp.price, t.price) as price, COALESCE(tlp.price, t.price) as effective_price
+         FROM Toppings t
+         LEFT JOIN ToppingLocationPricing tlp ON tlp.topping_id = t.id AND tlp.location_id = ?
+         ORDER BY t.sort_order, t.name`,
+        [lid]
+      );
+      return success(res, rows);
+    }
+    const rows = await query(`SELECT *, price as effective_price FROM Toppings ORDER BY sort_order, name`);
     return success(res, rows);
   } catch (err) { next(err); }
 };
@@ -809,7 +820,18 @@ const deleteTopping = async (req, res, next) => {
 // ── Crust Types CRUD ──────────────────────────────────────────────
 const adminGetCrusts = async (req, res, next) => {
   try {
-    const rows = await query(`SELECT * FROM CrustTypes ORDER BY sort_order, name`);
+    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    if (lid) {
+      const rows = await query(
+        `SELECT c.*, COALESCE(clp.extra_price, c.extra_price) as extra_price, COALESCE(clp.extra_price, c.extra_price) as effective_extra_price
+         FROM CrustTypes c
+         LEFT JOIN CrustLocationPricing clp ON clp.crust_id = c.id AND clp.location_id = ?
+         ORDER BY c.sort_order, c.name`,
+        [lid]
+      );
+      return success(res, rows);
+    }
+    const rows = await query(`SELECT *, extra_price as effective_extra_price FROM CrustTypes ORDER BY sort_order, name`);
     return success(res, rows);
   } catch (err) { next(err); }
 };
