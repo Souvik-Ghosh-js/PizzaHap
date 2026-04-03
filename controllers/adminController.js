@@ -1336,7 +1336,7 @@ const saveLocationGeofence = async (req, res, next) => {
 const getLocationPricing = async (req, res, next) => {
   try {
     const locationId = parseInt(req.params.locationId);
-    const [sizePricing, crustPricing, toppingPricing] = await Promise.all([
+    const [sizePricing, crustPricing, toppingPricing, crustSizePricing, toppingSizePricing] = await Promise.all([
       query(
         `SELECT plp.*, ps.size_name, ps.price as default_price, p.name as product_name
          FROM ProductLocationPricing plp
@@ -1359,14 +1359,22 @@ const getLocationPricing = async (req, res, next) => {
          WHERE tlp.location_id = ?
          ORDER BY t.name`, [locationId]
       ),
+      query(`SELECT clsp.* FROM CrustLocationSizePricing clsp WHERE clsp.location_id = ?`, [locationId]),
+      query(`SELECT tlsp.* FROM ToppingLocationSizePricing tlsp WHERE tlsp.location_id = ?`, [locationId]),
     ]);
-    return success(res, { sizes: sizePricing, crusts: crustPricing, toppings: toppingPricing });
+    return success(res, {
+      sizes: sizePricing,
+      crusts: crustPricing,
+      toppings: toppingPricing,
+      crust_size_overrides: crustSizePricing,
+      topping_size_overrides: toppingSizePricing
+    });
   } catch (err) { next(err); }
 };
 
 const setLocationPricing = async (req, res, next) => {
   try {
-    const { type, item_id, location_id, price } = req.body;
+    const { type, item_id, location_id, price, size_code } = req.body;
     if (!type || !item_id || !location_id || price == null) {
       return badRequest(res, 'type, item_id, location_id, and price are required');
     }
@@ -1377,17 +1385,33 @@ const setLocationPricing = async (req, res, next) => {
         [item_id, location_id, price]
       );
     } else if (type === 'crust') {
-      await query(
-        `INSERT INTO CrustLocationPricing (crust_id, location_id, extra_price) VALUES (?,?,?)
-         ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
-        [item_id, location_id, price]
-      );
+      if (size_code) {
+        await query(
+          `INSERT INTO CrustLocationSizePricing (crust_id, location_id, size_code, extra_price) VALUES (?,?,?,?)
+           ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+          [item_id, location_id, size_code, price]
+        );
+      } else {
+        await query(
+          `INSERT INTO CrustLocationPricing (crust_id, location_id, extra_price) VALUES (?,?,?)
+           ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+          [item_id, location_id, price]
+        );
+      }
     } else if (type === 'topping') {
-      await query(
-        `INSERT INTO ToppingLocationPricing (topping_id, location_id, price) VALUES (?,?,?)
-         ON DUPLICATE KEY UPDATE price = VALUES(price)`,
-        [item_id, location_id, price]
-      );
+      if (size_code) {
+        await query(
+          `INSERT INTO ToppingLocationSizePricing (topping_id, location_id, size_code, price) VALUES (?,?,?,?)
+           ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+          [item_id, location_id, size_code, price]
+        );
+      } else {
+        await query(
+          `INSERT INTO ToppingLocationPricing (topping_id, location_id, price) VALUES (?,?,?)
+           ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+          [item_id, location_id, price]
+        );
+      }
     } else {
       return badRequest(res, 'type must be size, crust, or topping');
     }
@@ -1397,13 +1421,21 @@ const setLocationPricing = async (req, res, next) => {
 
 const deleteLocationPricing = async (req, res, next) => {
   try {
-    const { type, location_id } = req.query;
+    const { type, location_id, size_code } = req.query;
     const item_id = req.params.id;
     if (!type || !location_id) return badRequest(res, 'type and location_id query params required');
-    if (type === 'size') await query(`DELETE FROM ProductLocationPricing WHERE product_size_id = ? AND location_id = ?`, [item_id, location_id]);
-    else if (type === 'crust') await query(`DELETE FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`, [item_id, location_id]);
-    else if (type === 'topping') await query(`DELETE FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`, [item_id, location_id]);
-    else return badRequest(res, 'type query param required (size, crust, or topping)');
+    
+    if (type === 'size') {
+      await query(`DELETE FROM ProductLocationPricing WHERE product_size_id = ? AND location_id = ?`, [item_id, location_id]);
+    } else if (type === 'crust') {
+      if (size_code) await query(`DELETE FROM CrustLocationSizePricing WHERE crust_id = ? AND location_id = ? AND size_code = ?`, [item_id, location_id, size_code]);
+      else await query(`DELETE FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`, [item_id, location_id]);
+    } else if (type === 'topping') {
+      if (size_code) await query(`DELETE FROM ToppingLocationSizePricing WHERE topping_id = ? AND location_id = ? AND size_code = ?`, [item_id, location_id, size_code]);
+      else await query(`DELETE FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`, [item_id, location_id]);
+    } else {
+      return badRequest(res, 'type query param required (size, crust, or topping)');
+    }
     return success(res, {}, 'Location pricing removed');
   } catch (err) { next(err); }
 };
