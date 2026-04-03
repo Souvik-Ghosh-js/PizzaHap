@@ -23,6 +23,7 @@ const {
   adminGetBanners, createBanner, updateBanner, deleteBanner,
   getLocationGeofence, saveLocationGeofence,
   getLocationPricing, setLocationPricing, deleteLocationPricing,
+  getSizePricing, setSizePricing, deleteSizePricing,
 } = require('../controllers/adminController');
 const { getAllRefunds, processRefund } = require('../controllers/refundController');
 const { adminGetAllTickets, adminReplyTicket } = require('../controllers/supportController');
@@ -212,5 +213,15 @@ router.post('/pricing', requireRole('super_admin', 'admin'), [
   body('price').isNumeric(),
 ], validate, setLocationPricing);
 router.delete('/pricing/:id', requireRole('super_admin', 'admin'), deleteLocationPricing);
+
+// ── Size-based Pricing (Crusts/Toppings by size) ─────────────────
+router.get('/size-pricing', getSizePricing);
+router.post('/size-pricing', requireRole('super_admin', 'admin'), [
+  body('type').isIn(['crust', 'topping']),
+  body('item_id').isInt(),
+  body('size_code').trim().notEmpty(),
+  body('price').isNumeric(),
+], validate, setSizePricing);
+router.delete('/size-pricing/:id', requireRole('super_admin', 'admin'), deleteSizePricing);
 
 module.exports = router;

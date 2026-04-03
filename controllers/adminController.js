@@ -1383,6 +1383,63 @@ const deleteLocationPricing = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Size-based Crust/Topping Pricing ─────────────────────────────
+const getSizePricing = async (req, res, next) => {
+  try {
+    const [crustPricing, toppingPricing] = await Promise.all([
+      query(
+        `SELECT csp.*, ct.name as crust_name, ct.extra_price as default_extra_price
+         FROM CrustSizePricing csp
+         JOIN CrustTypes ct ON ct.id = csp.crust_id
+         ORDER BY ct.name, csp.size_code`
+      ),
+      query(
+        `SELECT tsp.*, t.name as topping_name, t.price as default_price
+         FROM ToppingSizePricing tsp
+         JOIN Toppings t ON t.id = tsp.topping_id
+         ORDER BY t.name, tsp.size_code`
+      ),
+    ]);
+    return success(res, { crusts: crustPricing, toppings: toppingPricing });
+  } catch (err) { next(err); }
+};
+
+const setSizePricing = async (req, res, next) => {
+  try {
+    const { type, item_id, size_code, price } = req.body;
+    if (!type || !item_id || !size_code || price == null) {
+      return badRequest(res, 'type, item_id, size_code, and price are required');
+    }
+    if (type === 'crust') {
+      await query(
+        `INSERT INTO CrustSizePricing (crust_id, size_code, extra_price) VALUES (?,?,?)
+         ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+        [item_id, size_code, price]
+      );
+    } else if (type === 'topping') {
+      await query(
+        `INSERT INTO ToppingSizePricing (topping_id, size_code, price) VALUES (?,?,?)
+         ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+        [item_id, size_code, price]
+      );
+    } else {
+      return badRequest(res, 'type must be crust or topping');
+    }
+    return success(res, {}, 'Size pricing saved');
+  } catch (err) { next(err); }
+};
+
+const deleteSizePricing = async (req, res, next) => {
+  try {
+    const { type } = req.query;
+    const id = req.params.id;
+    if (type === 'crust') await query(`DELETE FROM CrustSizePricing WHERE id = ?`, [id]);
+    else if (type === 'topping') await query(`DELETE FROM ToppingSizePricing WHERE id = ?`, [id]);
+    else return badRequest(res, 'type query param required (crust or topping)');
+    return success(res, {}, 'Size pricing removed');
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   adminLogin, getDashboard, getReports,
   adminGetOrders, adminGetOrderDetail, updateOrderStatus, updatePaymentStatus, adminPlaceOrder,
@@ -1403,4 +1460,5 @@ module.exports = {
   adminGetBanners, createBanner, updateBanner, deleteBanner,
   getLocationGeofence, saveLocationGeofence,
   getLocationPricing, setLocationPricing, deleteLocationPricing,
+  getSizePricing, setSizePricing, deleteSizePricing,
 };

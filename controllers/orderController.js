@@ -8,13 +8,50 @@ const generateOrderNumber = () => {
   return `PIZZAHAP-${ts}${rand}`;
 };
 
+// ── Helper: resolve crust price (location > size > default) ──────
+const resolveCrustPrice = async (crustId, sizeCode, locationId) => {
+  const cr = await query(`SELECT extra_price FROM CrustTypes WHERE id = ? AND is_available = 1`, [crustId]);
+  if (!cr.length) return 0;
+  let price = parseFloat(cr[0].extra_price);
+  // Size-specific override
+  if (sizeCode) {
+    const sp = await query(`SELECT extra_price FROM CrustSizePricing WHERE crust_id = ? AND size_code = ?`, [crustId, sizeCode]);
+    if (sp.length) price = parseFloat(sp[0].extra_price);
+  }
+  // Location override takes highest priority
+  if (locationId) {
+    const lp = await query(`SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`, [crustId, locationId]);
+    if (lp.length) price = parseFloat(lp[0].extra_price);
+  }
+  return price;
+};
+
+// ── Helper: resolve topping price (location > size > default) ────
+const resolveToppingPrice = async (toppingId, sizeCode, locationId) => {
+  const tr = await query(`SELECT price FROM Toppings WHERE id = ? AND is_available = 1`, [toppingId]);
+  if (!tr.length) return 0;
+  let price = parseFloat(tr[0].price);
+  // Size-specific override
+  if (sizeCode) {
+    const sp = await query(`SELECT price FROM ToppingSizePricing WHERE topping_id = ? AND size_code = ?`, [toppingId, sizeCode]);
+    if (sp.length) price = parseFloat(sp[0].price);
+  }
+  // Location override takes highest priority
+  if (locationId) {
+    const lp = await query(`SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`, [toppingId, locationId]);
+    if (lp.length) price = parseFloat(lp[0].price);
+  }
+  return price;
+};
+
 // ── Helper: build price for a single item ─────────────────────────
 const buildItemPrice = async (item, location_id) => {
   const sizeResult = await query(
-    `SELECT price FROM ProductSizes WHERE id = ? AND is_available = 1`, [item.size_id]
+    `SELECT price, size_code FROM ProductSizes WHERE id = ? AND is_available = 1`, [item.size_id]
   );
   if (!sizeResult.length) throw new Error(`Invalid or unavailable size`);
   let itemPrice = parseFloat(sizeResult[0].price);
+  const sizeCode = sizeResult[0].size_code;
 
   // Check location-specific size price override
   if (location_id) {
@@ -26,33 +63,11 @@ const buildItemPrice = async (item, location_id) => {
   }
 
   if (item.crust_id) {
-    const cr = await query(`SELECT extra_price FROM CrustTypes WHERE id = ? AND is_available = 1`, [item.crust_id]);
-    if (cr.length) {
-      let crustPrice = parseFloat(cr[0].extra_price);
-      if (location_id) {
-        const locCrust = await query(
-          `SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`,
-          [item.crust_id, location_id]
-        );
-        if (locCrust.length) crustPrice = parseFloat(locCrust[0].extra_price);
-      }
-      itemPrice += crustPrice;
-    }
+    itemPrice += await resolveCrustPrice(item.crust_id, sizeCode, location_id);
   }
   if (item.toppings?.length) {
     for (const tid of item.toppings) {
-      const tr = await query(`SELECT price FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-      if (tr.length) {
-        let tPrice = parseFloat(tr[0].price);
-        if (location_id) {
-          const locTop = await query(
-            `SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`,
-            [tid, location_id]
-          );
-          if (locTop.length) tPrice = parseFloat(locTop[0].price);
-        }
-        itemPrice += tPrice;
-      }
+      itemPrice += await resolveToppingPrice(tid, sizeCode, location_id);
     }
   }
   return itemPrice;
@@ -106,7 +121,9 @@ const calculateOrder = async (req, res, next) => {
       const walletRow = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [req.user.id]);
       available_coins = walletRow.length ? walletRow[0].balance : 0;
       const redeemable = Math.min(parseInt(coins_to_redeem) || 0, available_coins);
-      coins_discount = Math.floor(Math.max(0, Math.min(redeemable, subtotal - discount_amount + delivery_fee)));
+      // 1 coin = ₹0.50
+      const coinValue = parseFloat((redeemable * 0.5).toFixed(2));
+      coins_discount = parseFloat(Math.max(0, Math.min(coinValue, subtotal - discount_amount + delivery_fee)).toFixed(2));
     }
 
     // NO TAX
@@ -147,8 +164,8 @@ const placeOrder = async (req, res, next) => {
     const locId = location_id ? parseInt(location_id) : null;
     for (const item of items) {
       const productResult = await query(
-        `SELECT p.*, ps.price as size_price, ps.size_name,
-                ct.extra_price as crust_extra, ct.name as crust_name
+        `SELECT p.*, ps.price as size_price, ps.size_name, ps.size_code,
+                ct.name as crust_name
          FROM Products p
          JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
          LEFT JOIN CrustTypes ct ON ct.id = ?
@@ -157,6 +174,7 @@ const placeOrder = async (req, res, next) => {
       );
       if (!productResult.length) return badRequest(res, `Product not available`);
       const product = productResult[0];
+      const sizeCode = product.size_code;
 
       // Stock check
       if (product.stock_quantity < (item.quantity || 1)) {
@@ -173,31 +191,20 @@ const placeOrder = async (req, res, next) => {
         if (locSizePrice.length) sizePrice = parseFloat(locSizePrice[0].price);
       }
 
-      // Crust price with location override
-      let crustPrice = parseFloat(product.crust_extra || 0);
-      if (item.crust_id && locId) {
-        const locCrustPrice = await query(
-          `SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`,
-          [item.crust_id, locId]
-        );
-        if (locCrustPrice.length) crustPrice = parseFloat(locCrustPrice[0].extra_price);
+      let itemPrice = sizePrice;
+
+      // Crust price (location > size > default)
+      if (item.crust_id) {
+        itemPrice += await resolveCrustPrice(item.crust_id, sizeCode, locId);
       }
 
-      let itemPrice = sizePrice + crustPrice;
+      // Topping prices (location > size > default)
       const itemToppings = [];
       if (item.toppings?.length) {
         for (const tid of item.toppings) {
           const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
           if (tr.length) {
-            let tPrice = parseFloat(tr[0].price);
-            if (locId) {
-              const locTopPrice = await query(
-                `SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`,
-                [tid, locId]
-              );
-              if (locTopPrice.length) tPrice = parseFloat(locTopPrice[0].price);
-            }
-            itemPrice += tPrice;
+            itemPrice += await resolveToppingPrice(tid, sizeCode, locId);
             itemToppings.push(tr[0]);
           }
         }
@@ -242,8 +249,9 @@ const placeOrder = async (req, res, next) => {
       const walletRow = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [userId]);
       const available = walletRow.length ? walletRow[0].balance : 0;
       coinsToRedeem = Math.min(coinsToRedeem, available);
-      coins_discount = Math.floor(Math.max(0, Math.min(coinsToRedeem, subtotal - discount_amount + delivery_fee)));
-      coinsToRedeem = coins_discount;
+      // 1 coin = ₹0.50
+      const coinValue = parseFloat((coinsToRedeem * 0.5).toFixed(2));
+      coins_discount = parseFloat(Math.max(0, Math.min(coinValue, subtotal - discount_amount + delivery_fee)).toFixed(2));
     }
 
     // NO TAX — total = subtotal - discount - coins_discount + delivery

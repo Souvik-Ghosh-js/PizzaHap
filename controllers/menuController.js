@@ -99,7 +99,18 @@ const getProductById = async (req, res, next) => {
           : query(`SELECT *, price as effective_price FROM Toppings WHERE is_available = 1 ORDER BY sort_order`))
       : Promise.resolve([]);
 
-    const [sizes, crusts, toppings, ratings] = await Promise.all([sizesPromise, crustsPromise, toppingsPromise, ratingsPromise]);
+    // Size-specific pricing for crusts and toppings
+    const crustSizePricingPromise = product.has_crust
+      ? query(`SELECT crust_id, size_code, extra_price FROM CrustSizePricing`)
+      : Promise.resolve([]);
+    const toppingSizePricingPromise = product.has_toppings
+      ? query(`SELECT topping_id, size_code, price FROM ToppingSizePricing`)
+      : Promise.resolve([]);
+
+    const [sizes, crusts, toppings, ratings, crustSizePricing, toppingSizePricing] = await Promise.all([
+      sizesPromise, crustsPromise, toppingsPromise, ratingsPromise,
+      crustSizePricingPromise, toppingSizePricingPromise,
+    ]);
 
     const avgRating = ratings.length
       ? (ratings.reduce((s, r) => s + r.rating, 0) / ratings.length).toFixed(1)
@@ -107,6 +118,8 @@ const getProductById = async (req, res, next) => {
 
     return success(res, {
       ...product, sizes, crusts, toppings,
+      crust_size_pricing: crustSizePricing,
+      topping_size_pricing: toppingSizePricing,
       avg_rating: avgRating, review_count: ratings.length,
       reviews: ratings.slice(0, 5),
     });

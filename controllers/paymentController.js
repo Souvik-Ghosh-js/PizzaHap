@@ -3,6 +3,37 @@ const axios = require('axios');
 const { query, transaction } = require('../config/db');
 const { success, created, badRequest, notFound } = require('../utils/response');
 const { notifyUser, notifyAdmins } = require('../services/notificationService');
+
+// ── Shared price resolution helpers (location > size > default) ──
+const resolveCrustPrice = async (crustId, sizeCode, locationId) => {
+  const cr = await query(`SELECT extra_price FROM CrustTypes WHERE id = ? AND is_available = 1`, [crustId]);
+  if (!cr.length) return 0;
+  let price = parseFloat(cr[0].extra_price);
+  if (sizeCode) {
+    const sp = await query(`SELECT extra_price FROM CrustSizePricing WHERE crust_id = ? AND size_code = ?`, [crustId, sizeCode]);
+    if (sp.length) price = parseFloat(sp[0].extra_price);
+  }
+  if (locationId) {
+    const lp = await query(`SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`, [crustId, locationId]);
+    if (lp.length) price = parseFloat(lp[0].extra_price);
+  }
+  return price;
+};
+
+const resolveToppingPrice = async (toppingId, sizeCode, locationId) => {
+  const tr = await query(`SELECT price FROM Toppings WHERE id = ? AND is_available = 1`, [toppingId]);
+  if (!tr.length) return 0;
+  let price = parseFloat(tr[0].price);
+  if (sizeCode) {
+    const sp = await query(`SELECT price FROM ToppingSizePricing WHERE topping_id = ? AND size_code = ?`, [toppingId, sizeCode]);
+    if (sp.length) price = parseFloat(sp[0].price);
+  }
+  if (locationId) {
+    const lp = await query(`SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`, [toppingId, locationId]);
+    if (lp.length) price = parseFloat(lp[0].price);
+  }
+  return price;
+};
 const logger = require('../utils/logger');
 
 const PAYU_BASE = process.env.PAYU_ENV === 'production'
@@ -59,8 +90,8 @@ const validateAndComputeOrder = async (body, userId) => {
   const locId = location_id ? parseInt(location_id) : null;
   for (const item of items) {
     const productResult = await query(
-      `SELECT p.*, ps.price as size_price, ps.size_name,
-              ct.extra_price as crust_extra, ct.name as crust_name
+      `SELECT p.*, ps.price as size_price, ps.size_name, ps.size_code,
+              ct.name as crust_name
        FROM Products p
        JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
        LEFT JOIN CrustTypes ct ON ct.id = ?
@@ -69,6 +100,7 @@ const validateAndComputeOrder = async (body, userId) => {
     );
     if (!productResult.length) throw { status: 400, message: 'Product not available' };
     const product = productResult[0];
+    const sizeCode = product.size_code;
 
     if (product.stock_quantity < (item.quantity || 1)) {
       throw { status: 400, message: `Insufficient stock for ${product.name}. Available: ${product.stock_quantity}` };
@@ -84,31 +116,20 @@ const validateAndComputeOrder = async (body, userId) => {
       if (locSizePrice.length) sizePrice = parseFloat(locSizePrice[0].price);
     }
 
-    // Crust price with location override
-    let crustPrice = parseFloat(product.crust_extra || 0);
-    if (item.crust_id && locId) {
-      const locCrustPrice = await query(
-        `SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`,
-        [item.crust_id, locId]
-      );
-      if (locCrustPrice.length) crustPrice = parseFloat(locCrustPrice[0].extra_price);
+    let itemPrice = sizePrice;
+
+    // Crust price (location > size > default)
+    if (item.crust_id) {
+      itemPrice += await resolveCrustPrice(item.crust_id, sizeCode, locId);
     }
 
-    let itemPrice = sizePrice + crustPrice;
+    // Topping prices (location > size > default)
     const itemToppings = [];
     if (item.toppings?.length) {
       for (const tid of item.toppings) {
         const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
         if (tr.length) {
-          let tPrice = parseFloat(tr[0].price);
-          if (locId) {
-            const locTopPrice = await query(
-              `SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`,
-              [tid, locId]
-            );
-            if (locTopPrice.length) tPrice = parseFloat(locTopPrice[0].price);
-          }
-          itemPrice += tPrice;
+          itemPrice += await resolveToppingPrice(tid, sizeCode, locId);
           itemToppings.push(tr[0]);
         }
       }
@@ -153,8 +174,9 @@ const validateAndComputeOrder = async (body, userId) => {
     const walletRow = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [userId]);
     const available = walletRow.length ? walletRow[0].balance : 0;
     coinsToRedeem = Math.min(coinsToRedeem, available);
-    coins_discount = Math.floor(Math.max(0, Math.min(coinsToRedeem, subtotal - discount_amount + delivery_fee)));
-    coinsToRedeem = coins_discount;
+    // 1 coin = ₹0.50
+    const coinValue = parseFloat((coinsToRedeem * 0.5).toFixed(2));
+    coins_discount = parseFloat(Math.max(0, Math.min(coinValue, subtotal - discount_amount + delivery_fee)).toFixed(2));
   }
 
   const total_amount = parseFloat((subtotal - discount_amount - coins_discount + delivery_fee).toFixed(2));

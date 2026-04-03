@@ -114,6 +114,44 @@ const migrate = async () => {
     console.log('SKIP  LocationGeofences already exists');
   }
 
+  // 6. CrustSizePricing — crust price varies by pizza size
+  if (!await tableExists(pool, 'CrustSizePricing')) {
+    await pool.execute(`
+      CREATE TABLE CrustSizePricing (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        crust_id INT NOT NULL,
+        size_code VARCHAR(10) NOT NULL,
+        extra_price DECIMAL(10,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_crust_size (crust_id, size_code),
+        FOREIGN KEY (crust_id) REFERENCES CrustTypes(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    console.log('OK    CrustSizePricing table created');
+  } else {
+    console.log('SKIP  CrustSizePricing already exists');
+  }
+
+  // 7. ToppingSizePricing — topping price varies by pizza size
+  if (!await tableExists(pool, 'ToppingSizePricing')) {
+    await pool.execute(`
+      CREATE TABLE ToppingSizePricing (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        topping_id INT NOT NULL,
+        size_code VARCHAR(10) NOT NULL,
+        price DECIMAL(10,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_topping_size (topping_id, size_code),
+        FOREIGN KEY (topping_id) REFERENCES Toppings(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    console.log('OK    ToppingSizePricing table created');
+  } else {
+    console.log('SKIP  ToppingSizePricing already exists');
+  }
+
   console.log('\n✅ v7 migrations complete!');
   process.exit(0);
 };
