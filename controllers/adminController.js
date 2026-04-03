@@ -189,9 +189,9 @@ const updateOrderStatus = async (req, res, next) => {
       await sendOrderStatusEmail(orderRow.user_email, orderRow.order_number, status);
     }
 
-    // Credit coins on delivery: 1 coin per Rs.10
-    if (status === 'delivered' && orderRow.user_id) {
-      const coinsEarned = Math.floor(orderRow.total_amount / 10);
+    // Credit coins on delivery: 1 coin per Rs.10 (Only for orders above 300)
+    if (status === 'delivered' && orderRow.user_id && orderRow.subtotal > 300) {
+      const coinsEarned = Math.floor(orderRow.subtotal / 10);
       if (coinsEarned > 0) await creditCoins(orderRow.user_id, orderRow.id, coinsEarned);
     }
 

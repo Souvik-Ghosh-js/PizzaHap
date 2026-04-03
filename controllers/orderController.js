@@ -15,10 +15,15 @@ const resolveCrustPrice = async (crustId, sizeCode, locationId) => {
   let price = parseFloat(cr[0].extra_price);
   // Size-specific override
   if (sizeCode) {
-    const sp = await query(`SELECT extra_price FROM CrustSizePricing WHERE crust_id = ? AND size_code = ?`, [crustId, sizeCode]);
+    const sp = await query(`SELECT extra_price FROM CrustSizePricing WHERE crust_id = ? AND LOWER(size_code) = LOWER(?)`, [crustId, sizeCode]);
     if (sp.length) price = parseFloat(sp[0].extra_price);
   }
-  // Location override takes highest priority
+  // Location-specific size override (Highest potential priority)
+  if (locationId && sizeCode) {
+    const lsp = await query(`SELECT extra_price FROM CrustLocationSizePricing WHERE crust_id = ? AND location_id = ? AND LOWER(size_code) = LOWER(?)`, [crustId, locationId, sizeCode]);
+    if (lsp.length) return parseFloat(lsp[0].extra_price);
+  }
+  // Location override (general)
   if (locationId) {
     const lp = await query(`SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`, [crustId, locationId]);
     if (lp.length) price = parseFloat(lp[0].extra_price);
@@ -33,10 +38,15 @@ const resolveToppingPrice = async (toppingId, sizeCode, locationId) => {
   let price = parseFloat(tr[0].price);
   // Size-specific override
   if (sizeCode) {
-    const sp = await query(`SELECT price FROM ToppingSizePricing WHERE topping_id = ? AND size_code = ?`, [toppingId, sizeCode]);
+    const sp = await query(`SELECT price FROM ToppingSizePricing WHERE topping_id = ? AND LOWER(size_code) = LOWER(?)`, [toppingId, sizeCode]);
     if (sp.length) price = parseFloat(sp[0].price);
   }
-  // Location override takes highest priority
+  // Location-specific size override (Highest potential priority)
+  if (locationId && sizeCode) {
+    const lsp = await query(`SELECT price FROM ToppingLocationSizePricing WHERE topping_id = ? AND location_id = ? AND LOWER(size_code) = LOWER(?)`, [toppingId, locationId, sizeCode]);
+    if (lsp.length) return parseFloat(lsp[0].price);
+  }
+  // Location override (general)
   if (locationId) {
     const lp = await query(`SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`, [toppingId, locationId]);
     if (lp.length) price = parseFloat(lp[0].price);
@@ -117,7 +127,8 @@ const calculateOrder = async (req, res, next) => {
     }
 
     let coins_discount = 0, available_coins = 0;
-    if (req.user && parseInt(coins_to_redeem) > 0) {
+    // Coins can only be redeemed if order subtotal is above 300
+    if (subtotal > 300 && req.user && parseInt(coins_to_redeem) > 0) {
       const walletRow = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [req.user.id]);
       available_coins = walletRow.length ? walletRow[0].balance : 0;
       const redeemable = Math.min(parseInt(coins_to_redeem) || 0, available_coins);
@@ -245,13 +256,16 @@ const placeOrder = async (req, res, next) => {
     }
 
     let coins_discount = 0, coinsToRedeem = parseInt(coins_to_redeem) || 0;
-    if (coinsToRedeem > 0) {
+    // Coins can only be redeemed if order subtotal is above 300
+    if (subtotal > 300 && coinsToRedeem > 0) {
       const walletRow = await query(`SELECT balance FROM UserCoins WHERE user_id = ?`, [userId]);
       const available = walletRow.length ? walletRow[0].balance : 0;
       coinsToRedeem = Math.min(coinsToRedeem, available);
       // 1 coin = ₹0.50
       const coinValue = parseFloat((coinsToRedeem * 0.5).toFixed(2));
       coins_discount = parseFloat(Math.max(0, Math.min(coinValue, subtotal - discount_amount + delivery_fee)).toFixed(2));
+    } else {
+      coinsToRedeem = 0; // Reset if subtotal <= 300
     }
 
     // NO TAX — total = subtotal - discount - coins_discount + delivery
