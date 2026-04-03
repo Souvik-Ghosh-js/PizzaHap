@@ -571,7 +571,8 @@ const adminGetProducts = async (req, res, next) => {
                 FROM ProductSizes ps
                 LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ${lidSql}
                 WHERE ps.product_id = p.id AND ps.is_available = 1
-              ) as min_price`;
+              ) as min_price,
+              EXISTS(SELECT 1 FROM ProductLocationAvailability pla WHERE pla.product_id = p.id AND pla.location_id = ${lidSql}) as is_hidden`;
 
     const [countRes, rows] = await Promise.all([
       query(`SELECT COUNT(*) as total FROM Products p ${where}`, params),
@@ -588,8 +589,9 @@ const adminGetProducts = async (req, res, next) => {
 
     const processedRows = rows.map(r => ({
       ...r,
-      base_price: r.min_price !== null ? r.min_price : r.base_price
-    }));
+      base_price: r.min_price !== null ? r.min_price : r.base_price,
+      location_available: !r.is_hidden
+    })).filter(r => r.location_available);
 
     return paginated(res, processedRows, countRes[0].total, page, limit);
   } catch (err) { next(err); }
@@ -642,6 +644,10 @@ const updateProduct = async (req, res, next) => {
         req.params.id,
       ]
     );
+    if (base_price != null) {
+      // Sync regular size price if it exists
+      await query(`UPDATE ProductSizes SET price = ? WHERE product_id = ? AND size_code = 'regular'`, [parseFloat(base_price), req.params.id]);
+    }
     return success(res, {}, 'Product updated');
   } catch (err) { next(err); }
 };
