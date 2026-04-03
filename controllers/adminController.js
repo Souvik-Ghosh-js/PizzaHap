@@ -707,14 +707,14 @@ const adminGetProductSizes = async (req, res, next) => {
     let rows;
     if (lid) {
       rows = await query(
-        `SELECT ps.*, COALESCE(plp.price, ps.price) as price, COALESCE(plp.price, ps.price) as effective_price
+        `SELECT ps.*, plp.price as location_price, COALESCE(plp.price, ps.price) as effective_price
          FROM ProductSizes ps
          LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ?
          WHERE ps.product_id = ? ORDER BY ps.price`,
         [lid, req.params.id]
       );
     } else {
-      rows = await query(`SELECT *, price as effective_price FROM ProductSizes WHERE product_id = ? ORDER BY price`, [req.params.id]);
+      rows = await query(`SELECT *, NULL as location_price, price as effective_price FROM ProductSizes WHERE product_id = ? ORDER BY price`, [req.params.id]);
     }
 
     // 2. Get crust/topping size matrix for this branch
