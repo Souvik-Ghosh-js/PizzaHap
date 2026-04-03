@@ -702,18 +702,43 @@ const getProductAvailabilityMatrix = async (req, res, next) => {
 const adminGetProductSizes = async (req, res, next) => {
   try {
     const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    
+    // 1. Get sizes
+    let rows;
     if (lid) {
-      const rows = await query(
+      rows = await query(
         `SELECT ps.*, COALESCE(plp.price, ps.price) as price, COALESCE(plp.price, ps.price) as effective_price
          FROM ProductSizes ps
          LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ?
          WHERE ps.product_id = ? ORDER BY ps.price`,
         [lid, req.params.id]
       );
-      return success(res, rows);
+    } else {
+      rows = await query(`SELECT *, price as effective_price FROM ProductSizes WHERE product_id = ? ORDER BY price`, [req.params.id]);
     }
-    const rows = await query(`SELECT *, price as effective_price FROM ProductSizes WHERE product_id = ? ORDER BY price`, [req.params.id]);
-    return success(res, rows);
+
+    // 2. Get crust/topping size matrix for this branch
+    const [crustPricing, toppingPricing] = await Promise.all([
+      lid ? query(
+        `SELECT csp.crust_id, csp.size_code, COALESCE(clsp.extra_price, csp.extra_price) as extra_price
+         FROM CrustSizePricing csp
+         LEFT JOIN CrustLocationSizePricing clsp ON clsp.crust_id = csp.crust_id AND clsp.size_code = csp.size_code AND clsp.location_id = ?`,
+        [lid]
+      ) : query(`SELECT crust_id, size_code, extra_price FROM CrustSizePricing`),
+      
+      lid ? query(
+        `SELECT tsp.topping_id, tsp.size_code, COALESCE(tlsp.price, tsp.price) as price
+         FROM ToppingSizePricing tsp
+         LEFT JOIN ToppingLocationSizePricing tlsp ON tlsp.topping_id = tsp.topping_id AND tlsp.size_code = tsp.size_code AND tlsp.location_id = ?`,
+        [lid]
+      ) : query(`SELECT topping_id, size_code, price FROM ToppingSizePricing`)
+    ]);
+
+    return success(res, {
+      sizes: rows,
+      crust_pricing: crustPricing,
+      topping_pricing: toppingPricing
+    });
   } catch (err) { next(err); }
 };
 
@@ -1386,19 +1411,39 @@ const deleteLocationPricing = async (req, res, next) => {
 // ── Size-based Crust/Topping Pricing ─────────────────────────────
 const getSizePricing = async (req, res, next) => {
   try {
+    const lid = req.query.location_id ? parseInt(req.query.location_id) : null;
+    let crustQuery, toppingQuery;
+
+    if (lid) {
+      crustQuery = `
+        SELECT csp.*, clsp.extra_price as location_extra_price, ct.name as crust_name, ct.extra_price as default_extra_price
+        FROM CrustSizePricing csp
+        JOIN CrustTypes ct ON ct.id = csp.crust_id
+        LEFT JOIN CrustLocationSizePricing clsp ON clsp.crust_id = csp.crust_id AND clsp.size_code = csp.size_code AND clsp.location_id = ?
+        ORDER BY ct.name, csp.size_code`;
+      toppingQuery = `
+        SELECT tsp.*, tlsp.price as location_price, t.name as topping_name, t.price as default_price
+        FROM ToppingSizePricing tsp
+        JOIN Toppings t ON t.id = tsp.topping_id
+        LEFT JOIN ToppingLocationSizePricing tlsp ON tlsp.topping_id = tsp.topping_id AND tlsp.size_code = tsp.size_code AND tlsp.location_id = ?
+        ORDER BY t.name, tsp.size_code`;
+    } else {
+      crustQuery = `
+        SELECT csp.*, ct.name as crust_name, ct.extra_price as default_extra_price
+        FROM CrustSizePricing csp
+        JOIN CrustTypes ct ON ct.id = csp.crust_id
+        ORDER BY ct.name, csp.size_code`;
+      toppingQuery = `
+        SELECT tsp.*, t.name as topping_name, t.price as default_price
+        FROM ToppingSizePricing tsp
+        JOIN Toppings t ON t.id = tsp.topping_id
+        ORDER BY t.name, tsp.size_code`;
+    }
+
+    const params = lid ? [lid] : [];
     const [crustPricing, toppingPricing] = await Promise.all([
-      query(
-        `SELECT csp.*, ct.name as crust_name, ct.extra_price as default_extra_price
-         FROM CrustSizePricing csp
-         JOIN CrustTypes ct ON ct.id = csp.crust_id
-         ORDER BY ct.name, csp.size_code`
-      ),
-      query(
-        `SELECT tsp.*, t.name as topping_name, t.price as default_price
-         FROM ToppingSizePricing tsp
-         JOIN Toppings t ON t.id = tsp.topping_id
-         ORDER BY t.name, tsp.size_code`
-      ),
+      query(crustQuery, params),
+      query(toppingQuery, params),
     ]);
     return success(res, { crusts: crustPricing, toppings: toppingPricing });
   } catch (err) { next(err); }
@@ -1406,36 +1451,60 @@ const getSizePricing = async (req, res, next) => {
 
 const setSizePricing = async (req, res, next) => {
   try {
-    const { type, item_id, size_code, price } = req.body;
+    const { type, item_id, size_code, price, location_id } = req.body;
     if (!type || !item_id || !size_code || price == null) {
       return badRequest(res, 'type, item_id, size_code, and price are required');
     }
-    if (type === 'crust') {
-      await query(
-        `INSERT INTO CrustSizePricing (crust_id, size_code, extra_price) VALUES (?,?,?)
-         ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
-        [item_id, size_code, price]
-      );
-    } else if (type === 'topping') {
-      await query(
-        `INSERT INTO ToppingSizePricing (topping_id, size_code, price) VALUES (?,?,?)
-         ON DUPLICATE KEY UPDATE price = VALUES(price)`,
-        [item_id, size_code, price]
-      );
+
+    if (location_id) {
+      // Set location-specific price
+      if (type === 'crust') {
+        await query(
+          `INSERT INTO CrustLocationSizePricing (crust_id, location_id, size_code, extra_price) VALUES (?,?,?,?)
+           ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+          [item_id, location_id, size_code, price]
+        );
+      } else if (type === 'topping') {
+        await query(
+          `INSERT INTO ToppingLocationSizePricing (topping_id, location_id, size_code, price) VALUES (?,?,?,?)
+           ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+          [item_id, location_id, size_code, price]
+        );
+      }
     } else {
-      return badRequest(res, 'type must be crust or topping');
+      // Set global baseline price
+      if (type === 'crust') {
+        await query(
+          `INSERT INTO CrustSizePricing (crust_id, size_code, extra_price) VALUES (?,?,?)
+           ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+          [item_id, size_code, price]
+        );
+      } else if (type === 'topping') {
+        await query(
+          `INSERT INTO ToppingSizePricing (topping_id, size_code, price) VALUES (?,?,?)
+           ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+          [item_id, size_code, price]
+        );
+      }
     }
+
     return success(res, {}, 'Size pricing saved');
   } catch (err) { next(err); }
 };
 
 const deleteSizePricing = async (req, res, next) => {
   try {
-    const { type } = req.query;
-    const id = req.params.id;
-    if (type === 'crust') await query(`DELETE FROM CrustSizePricing WHERE id = ?`, [id]);
-    else if (type === 'topping') await query(`DELETE FROM ToppingSizePricing WHERE id = ?`, [id]);
-    else return badRequest(res, 'type query param required (crust or topping)');
+    const { type, location_id } = req.query;
+    const item_id = req.params.itemId; // Using itemId from params for more specific delete if needed, but the user used id
+    const size_code = req.query.size_code;
+
+    if (location_id && size_code) {
+      if (type === 'crust') await query(`DELETE FROM CrustLocationSizePricing WHERE crust_id = ? AND location_id = ? AND size_code = ?`, [req.params.id, location_id, size_code]);
+      else if (type === 'topping') await query(`DELETE FROM ToppingLocationSizePricing WHERE topping_id = ? AND location_id = ? AND size_code = ?`, [req.params.id, location_id, size_code]);
+    } else {
+      if (type === 'crust') await query(`DELETE FROM CrustSizePricing WHERE id = ?`, [req.params.id]);
+      else if (type === 'topping') await query(`DELETE FROM ToppingSizePricing WHERE id = ?`, [req.params.id]);
+    }
     return success(res, {}, 'Size pricing removed');
   } catch (err) { next(err); }
 };

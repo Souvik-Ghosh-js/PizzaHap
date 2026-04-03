@@ -99,12 +99,27 @@ const getProductById = async (req, res, next) => {
           : query(`SELECT *, price as effective_price FROM Toppings WHERE is_available = 1 ORDER BY sort_order`))
       : Promise.resolve([]);
 
-    // Size-specific pricing for crusts and toppings
+    // Size-specific pricing for crusts and toppings, with location override
     const crustSizePricingPromise = product.has_crust
-      ? query(`SELECT crust_id, size_code, extra_price FROM CrustSizePricing`)
+      ? (lid
+          ? query(
+              `SELECT csp.crust_id, csp.size_code, COALESCE(clsp.extra_price, csp.extra_price) as extra_price
+               FROM CrustSizePricing csp
+               LEFT JOIN CrustLocationSizePricing clsp ON clsp.crust_id = csp.crust_id AND clsp.size_code = csp.size_code AND clsp.location_id = ?`,
+              [lid]
+            )
+          : query(`SELECT crust_id, size_code, extra_price FROM CrustSizePricing`))
       : Promise.resolve([]);
+
     const toppingSizePricingPromise = product.has_toppings
-      ? query(`SELECT topping_id, size_code, price FROM ToppingSizePricing`)
+      ? (lid
+          ? query(
+              `SELECT tsp.topping_id, tsp.size_code, COALESCE(tlsp.price, tsp.price) as price
+               FROM ToppingSizePricing tsp
+               LEFT JOIN ToppingLocationSizePricing tlsp ON tlsp.topping_id = tsp.topping_id AND tlsp.size_code = tsp.size_code AND tlsp.location_id = ?`,
+              [lid]
+            )
+          : query(`SELECT topping_id, size_code, price FROM ToppingSizePricing`))
       : Promise.resolve([]);
 
     const [sizes, crusts, toppings, ratings, crustSizePricing, toppingSizePricing] = await Promise.all([
