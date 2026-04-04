@@ -87,7 +87,7 @@ const validateCoupon = async (req, res, next) => {
     if (coupon.discount_type === 'percentage') {
       discount = Math.min((order_value * coupon.discount_value) / 100, coupon.max_discount || Infinity);
     } else if (coupon.discount_type === 'flat') {
-      discount = coupon.discount_value;
+      discount = parseFloat(coupon.discount_value);
     }
     // buy_1_get_1: calculated_discount = 0 here; actual discount computed at order time based on cheapest item
     const applicableIds = coupon.applicable_product_ids
