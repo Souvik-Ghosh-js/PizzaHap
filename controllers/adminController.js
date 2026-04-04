@@ -1058,12 +1058,16 @@ const createCoupon = async (req, res, next) => {
     const productIds = Array.isArray(applicable_product_ids) && applicable_product_ids.length > 0
       ? JSON.stringify(applicable_product_ids.map(Number))
       : null;
+    const fromDate = new Date(valid_from);
+    fromDate.setDate(fromDate.getDate() - 1);
+    const untilDate = new Date(valid_until);
+
     await query(
       `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until, applicable_product_ids)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [code.toUpperCase(), description || null, discount_type, resolvedDiscountValue,
       min_order_value || 0, max_discount || null, usage_limit || null,
-      per_user_limit || 1, new Date(valid_from), new Date(valid_until), productIds]
+      per_user_limit || 1, fromDate, untilDate, productIds]
     );
     return created(res, {}, 'Coupon created');
   } catch (err) { next(err); }
