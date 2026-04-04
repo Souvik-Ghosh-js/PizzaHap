@@ -65,7 +65,7 @@ const validateCoupon = async (req, res, next) => {
     const { code, order_value } = req.body;
     const result = await query(
       `SELECT * FROM Coupons WHERE code = ? AND is_active = 1
-       AND valid_from <= NOW() AND valid_until >= NOW()
+       AND valid_from <= UTC_TIMESTAMP() AND valid_until >= UTC_TIMESTAMP()
        AND (usage_limit IS NULL OR used_count < usage_limit)`,
       [code.toUpperCase()]
     );
@@ -108,7 +108,7 @@ const getActiveCoupons = async (req, res, next) => {
     const result = await query(
       `SELECT code, description, discount_type, discount_value, min_order_value, valid_until, applicable_product_ids
        FROM Coupons
-       WHERE is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW()
+       WHERE is_active = 1 AND valid_from <= UTC_TIMESTAMP() AND valid_until >= UTC_TIMESTAMP()
          AND (usage_limit IS NULL OR used_count < usage_limit)
        ORDER BY created_at DESC`
     );

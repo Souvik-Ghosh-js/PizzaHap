@@ -324,7 +324,7 @@ const adminPlaceOrder = async (req, res, next) => {
     if (coupon_code) {
       const couponResult = await query(
         `SELECT * FROM Coupons WHERE code = ? AND is_active = 1
-         AND valid_from <= NOW() AND valid_until >= NOW()
+         AND valid_from <= UTC_TIMESTAMP() AND valid_until >= UTC_TIMESTAMP()
          AND (usage_limit IS NULL OR used_count < usage_limit)`,
         [coupon_code.toUpperCase()]
       );
