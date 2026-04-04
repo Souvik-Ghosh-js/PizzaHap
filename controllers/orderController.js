@@ -80,7 +80,7 @@ const buildItemPrice = async (item, location_id) => {
       itemPrice += await resolveToppingPrice(tid, sizeCode, location_id);
     }
   }
-  return itemPrice;
+  return { price: itemPrice, sizeCode };
 };
 
 // ── Calculate order totals (preview) ─────────────────────────────
@@ -92,8 +92,8 @@ const calculateOrder = async (req, res, next) => {
     // Build prices once — reused for BOGO filtering
     const itemPriceMap = [];
     for (const item of items) {
-      const price = await buildItemPrice(item, location_id ? parseInt(location_id) : null);
-      itemPriceMap.push({ product_id: item.product_id, price });
+      const { price, sizeCode } = await buildItemPrice(item, location_id ? parseInt(location_id) : null);
+      itemPriceMap.push({ product_id: item.product_id, price, sizeCode });
       subtotal += price * (item.quantity || 1);
     }
     subtotal = parseFloat(subtotal.toFixed(2));
@@ -113,10 +113,11 @@ const calculateOrder = async (req, res, next) => {
         const applicableIds = coupon.applicable_product_ids
           ? (typeof coupon.applicable_product_ids === 'string' ? JSON.parse(coupon.applicable_product_ids) : coupon.applicable_product_ids)
           : [];
-        const eligible = applicableIds.length > 0
+        const eligible = (applicableIds.length > 0
           ? itemPriceMap.filter(i => applicableIds.includes(i.product_id))
-          : itemPriceMap;
-        if (!eligible.length) return badRequest(res, 'No eligible items in cart for this BOGO coupon');
+          : itemPriceMap
+        ).filter(i => ['medium', 'large'].includes(i.sizeCode?.toLowerCase()));
+        if (!eligible.length) return badRequest(res, 'BOGO coupons only apply to Medium or Large sizes');
         discount_amount = parseFloat(Math.min(...eligible.map(i => i.price)).toFixed(2));
       } else if (coupon.discount_type === 'percentage') {
         discount_amount = Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity);
@@ -241,10 +242,11 @@ const placeOrder = async (req, res, next) => {
         const applicableIds = coupon.applicable_product_ids
           ? (typeof coupon.applicable_product_ids === 'string' ? JSON.parse(coupon.applicable_product_ids) : coupon.applicable_product_ids)
           : [];
-        const eligible = applicableIds.length > 0
+        const eligible = (applicableIds.length > 0
           ? orderItems.filter(i => applicableIds.includes(i.product_id))
-          : orderItems;
-        if (!eligible.length) return badRequest(res, 'No eligible items in cart for this BOGO coupon');
+          : orderItems
+        ).filter(i => ['medium', 'large'].includes(i.product.size_code?.toLowerCase()));
+        if (!eligible.length) return badRequest(res, 'BOGO coupons only apply to Medium or Large sizes');
         discount_amount = parseFloat(Math.min(...eligible.map(i => i.unit_price)).toFixed(2));
       } else if (coupon.discount_type === 'percentage') {
         discount_amount = Math.min((subtotal * coupon.discount_value) / 100, coupon.max_discount || Infinity);
