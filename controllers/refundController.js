@@ -62,12 +62,18 @@ const getMyRefunds = async (req, res, next) => {
 
 const getAllRefunds = async (req, res, next) => {
   try {
-    const { status } = req.query;
-    let whereClause = '';
+    const { status, location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
+
+    let whereClause = 'WHERE 1=1';
     const params = [];
-    if (status) { whereClause = 'WHERE r.status = ?'; params.push(status); }
+    if (status) { whereClause += ' AND r.status = ?'; params.push(status); }
+    if (lid) { whereClause += ' AND o.location_id = ?'; params.push(lid); }
+
     const result = await query(
-      `SELECT r.*, o.order_number, o.coins_earned, o.user_id,
+      `SELECT r.*, o.order_number, o.coins_earned, o.user_id, o.location_id,
               u.name as user_name, u.email as user_email
        FROM Refunds r
        JOIN Orders o ON r.order_id = o.id
@@ -83,8 +89,10 @@ const getAllRefunds = async (req, res, next) => {
 const processRefund = async (req, res, next) => {
   try {
     const { action, notes } = req.body;
+    const lid = req.admin.location_id;
+
     const refundResult = await query(
-      `SELECT r.*, p.gateway_payment_id, o.user_id, o.order_number, o.coins_earned
+      `SELECT r.*, p.gateway_payment_id, o.user_id, o.order_number, o.coins_earned, o.location_id
        FROM Refunds r
        JOIN Payments p ON r.payment_id = p.id
        JOIN Orders o   ON r.order_id   = o.id
@@ -93,6 +101,11 @@ const processRefund = async (req, res, next) => {
     );
     if (!refundResult.length) return notFound(res, 'Refund request not found or already processed');
     const refund = refundResult[0];
+
+    // Security check: Location isolation
+    if (lid && refund.location_id !== lid) {
+      return unauthorized(res, 'You do not have permission to process this refund');
+    }
 
     if (action === 'reject') {
       await query(

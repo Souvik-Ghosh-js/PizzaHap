@@ -163,6 +163,12 @@ const updateOrderStatus = async (req, res, next) => {
       [req.params.id]
     );
     if (!orderRow) return notFound(res, 'Order not found');
+
+    const lid = req.admin.location_id;
+    if (lid && orderRow.location_id !== lid) {
+      return unauthorized(res, 'You do not have permission to update this order');
+    }
+
     if (!transitions[orderRow.status]?.includes(status)) {
       return badRequest(res, `Cannot transition from '${orderRow.status}' to '${status}'`);
     }

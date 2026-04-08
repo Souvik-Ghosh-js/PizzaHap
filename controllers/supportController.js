@@ -104,21 +104,26 @@ const replyToTicket = async (req, res, next) => {
 // ── Admin: list all tickets ───────────────────────────────────────
 const adminGetAllTickets = async (req, res, next) => {
   try {
-    const { status, priority } = req.query;
+    const { status, priority, location_id } = req.query;
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
     const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
+
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
 
     let where = 'WHERE 1=1';
     const params = [];
     if (status)   { where += ' AND t.status = ?';   params.push(status); }
     if (priority) { where += ' AND t.priority = ?'; params.push(priority); }
+    if (lid)      { where += ' AND o.location_id = ?'; params.push(lid); }
 
     const countRes = await query(
-      `SELECT COUNT(*) as total FROM SupportTickets t ${where}`, params
+      `SELECT COUNT(*) as total FROM SupportTickets t LEFT JOIN Orders o ON t.order_id = o.id ${where}`, params
     );
     const result = await query(
-      `SELECT t.*, u.name as user_name, u.email as user_email, o.order_number,
+      `SELECT t.*, u.name as user_name, u.email as user_email, o.order_number, o.location_id,
               (SELECT COUNT(*) FROM SupportMessages sm
                WHERE sm.ticket_id = t.id AND sm.sender_role = 'user' AND sm.is_read = 0) as unread_count
        FROM SupportTickets t
@@ -138,9 +143,10 @@ const adminGetAllTickets = async (req, res, next) => {
 // ── Admin: get single ticket with full message thread ─────────────
 const adminGetTicketById = async (req, res, next) => {
   try {
+    const lid = req.admin.location_id;
     const ticketResult = await query(
       `SELECT t.*, u.name as user_name, u.email as user_email,
-              u.mobile as user_mobile, o.order_number
+              u.mobile as user_mobile, o.order_number, o.location_id
        FROM SupportTickets t
        JOIN  Users  u ON t.user_id  = u.id
        LEFT JOIN Orders o ON t.order_id = o.id
@@ -148,6 +154,12 @@ const adminGetTicketById = async (req, res, next) => {
       [req.params.id]
     );
     if (!ticketResult.length) return notFound(res, 'Ticket not found');
+    const ticket = ticketResult[0];
+
+    // Security check: Location isolation
+    if (lid && ticket.location_id && ticket.location_id !== lid) {
+      return unauthorized(res, 'You do not have permission to access this ticket');
+    }
 
     const messages = await query(
       `SELECT sm.*,
@@ -173,10 +185,20 @@ const adminGetTicketById = async (req, res, next) => {
 const adminReplyTicket = async (req, res, next) => {
   try {
     const { message, status } = req.body;
+    const lid = req.admin.location_id;
 
-    // Verify ticket exists
-    const ticketResult = await query(`SELECT id FROM SupportTickets WHERE id = ?`, [req.params.id]);
+    // Verify ticket exists and respect location isolation
+    const ticketResult = await query(
+      `SELECT t.id, o.location_id 
+       FROM SupportTickets t LEFT JOIN Orders o ON t.order_id = o.id 
+       WHERE t.id = ?`, 
+      [req.params.id]
+    );
     if (!ticketResult.length) return notFound(res, 'Ticket not found');
+    
+    if (lid && ticketResult[0].location_id && ticketResult[0].location_id !== lid) {
+      return unauthorized(res, 'You do not have permission to reply to this ticket');
+    }
 
     await query(
       `INSERT INTO SupportMessages (ticket_id, sender_id, sender_role, message) VALUES (?, ?, 'admin', ?)`,
