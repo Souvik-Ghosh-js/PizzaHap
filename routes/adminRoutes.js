@@ -72,7 +72,7 @@ router.put('/orders/:id/payment-status', [body('payment_status').notEmpty()], va
 router.get('/orders/:id/invoice', generateInvoice);
 
 // In-house billing
-router.post('/orders/inhouse', requireRole('super_admin', 'admin'), [
+router.post('/orders/inhouse', requireRole('super_admin', 'admin', 'staff'), [
   body('items').isArray({ min: 1 }),
   body('customer_name').optional().trim(),
   body('customer_phone').optional().trim(),
@@ -80,12 +80,12 @@ router.post('/orders/inhouse', requireRole('super_admin', 'admin'), [
 ], validate, adminPlaceOrder);
 
 // Assign rider to order
-router.put('/orders/:id/rider', requireRole('super_admin', 'admin'), [
+router.put('/orders/:id/rider', requireRole('super_admin', 'admin', 'staff'), [
   body('rider_id').optional({ nullable: true }).isInt(),
 ], validate, assignRiderToOrder);
 
 // Accept / Reject a pending order
-router.put('/orders/:id/accept-reject', requireRole('super_admin', 'admin'), [
+router.put('/orders/:id/accept-reject', requireRole('super_admin', 'admin', 'staff'), [
   body('action').isIn(['accept', 'reject']).withMessage('action must be accept or reject'),
   body('reason').optional().trim(),
 ], validate, acceptRejectOrder);

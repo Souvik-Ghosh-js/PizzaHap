@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 const { query, transaction } = require('../config/db');
+const { normalizeEmail } = require('../services/otpService');
 const { success, created, badRequest, notFound, paginated, unauthorized } = require('../utils/response');
 const { notifyUser, notifyAdmins, creditCoins, revertCoins } = require('../services/notificationService');
 const { sendOrderStatusEmail, sendRiderAssignmentEmail } = require('../services/otpService');
@@ -11,7 +12,8 @@ const { sendOrderStatusEmail, sendRiderAssignmentEmail } = require('../services/
 const adminLogin = async (req, res, next) => {
   try {
     const { email, password, location_id } = req.body;
-    const rows = await query(`SELECT * FROM Admins WHERE email = ? AND is_active = 1`, [email]);
+    const normalizedEmail = normalizeEmail(email);
+    const rows = await query(`SELECT * FROM Admins WHERE email = ? AND is_active = 1`, [normalizedEmail]);
     if (!rows.length) return unauthorized(res, 'Invalid credentials');
     const admin = rows[0];
     if (!await bcrypt.compare(password, admin.password_hash)) return unauthorized(res, 'Invalid credentials');
