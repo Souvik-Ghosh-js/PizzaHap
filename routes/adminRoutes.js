@@ -24,6 +24,7 @@ const {
   getLocationGeofence, saveLocationGeofence,
   getLocationPricing, setLocationPricing, deleteLocationPricing,
   getSizePricing, setSizePricing, deleteSizePricing,
+  getAllAdmins, createAdminAccount, updateAdminAccount, deleteAdminAccount,
 } = require('../controllers/adminController');
 const { getAllRefunds, processRefund } = require('../controllers/refundController');
 const { adminGetAllTickets, adminReplyTicket } = require('../controllers/supportController');
@@ -223,5 +224,15 @@ router.post('/size-pricing', requireRole('super_admin', 'admin'), [
   body('price').isNumeric(),
 ], validate, setSizePricing);
 router.delete('/size-pricing/:id', requireRole('super_admin', 'admin'), deleteSizePricing);
+
+// ── Admin Management (Super Admin only) ──────────────────────────
+router.get('/manage-admins', requireRole('super_admin'), getAllAdmins);
+router.post('/manage-admins', requireRole('super_admin'), [
+  body('name').trim().notEmpty(),
+  body('email').isEmail(),
+  body('password').isLength({ min: 6 }),
+], validate, createAdminAccount);
+router.put('/manage-admins/:id', requireRole('super_admin'), updateAdminAccount);
+router.delete('/manage-admins/:id', requireRole('super_admin'), deleteAdminAccount);
 
 module.exports = router;

@@ -1557,6 +1557,57 @@ const deleteSizePricing = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Admin Management (Super Admin only) ──────────────────────────
+const getAllAdmins = async (req, res, next) => {
+  try {
+    const rows = await query(
+      `SELECT a.id, a.name, a.email, a.role, a.location_id, a.is_active, a.last_login, 
+              l.name as location_name 
+       FROM Admins a 
+       LEFT JOIN Locations l ON a.location_id = l.id 
+       ORDER BY a.id DESC`
+    );
+    return success(res, rows);
+  } catch (err) { next(err); }
+};
+
+const createAdminAccount = async (req, res, next) => {
+  try {
+    const { name, email, password, role, location_id } = req.body;
+    const hash = await bcrypt.hash(password, 10);
+    const result = await query(
+      `INSERT INTO Admins (name, email, password_hash, role, location_id, is_active) VALUES (?,?,?,?,?,1)`,
+      [name, email, hash, role || 'admin', location_id || null]
+    );
+    return created(res, { id: result.insertId }, 'Admin account created');
+  } catch (err) { next(err); }
+};
+
+const updateAdminAccount = async (req, res, next) => {
+  try {
+    const { name, email, password, role, location_id, is_active } = req.body;
+    let sql = 'UPDATE Admins SET name=?, email=?, role=?, location_id=?, is_active=?';
+    const params = [name, email, role, location_id || null, is_active ? 1 : 0];
+    if (password) {
+      sql += ', password_hash=?';
+      params.push(await bcrypt.hash(password, 10));
+    }
+    sql += ' WHERE id=?';
+    params.push(req.params.id);
+    await query(sql, params);
+    return success(res, {}, 'Admin account updated');
+  } catch (err) { next(err); }
+};
+
+const deleteAdminAccount = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (parseInt(id) === req.admin.id) return badRequest(res, 'Cannot delete yourself');
+    await query(`DELETE FROM Admins WHERE id = ?`, [id]);
+    return success(res, {}, 'Admin account deleted');
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   adminLogin, getDashboard, getReports,
   adminGetOrders, adminGetOrderDetail, updateOrderStatus, updatePaymentStatus, adminPlaceOrder,
@@ -1578,4 +1629,6 @@ module.exports = {
   getLocationGeofence, saveLocationGeofence,
   getLocationPricing, setLocationPricing, deleteLocationPricing,
   getSizePricing, setSizePricing, deleteSizePricing,
+  // New Admin CRUD
+  getAllAdmins, createAdminAccount, updateAdminAccount, deleteAdminAccount,
 };
