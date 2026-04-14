@@ -123,7 +123,16 @@ const refreshToken = async (req, res, next) => {
     if (!result.length) return unauthorized(res, 'Invalid or expired refresh token');
 
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(decoded.id);
-    await query(`DELETE FROM RefreshTokens WHERE token = ?`, [token]);
+    
+    // Rotation with grace period: Mark old token for deletion soon, don't delete yet
+    // To keep it simple: we keep both for now, and clean up expired ones periodically.
+    // Or just update the existing record with the new token but keep the old one valid for 1 min?
+    // Let's just delete the old one but ONLY if we are sure the rotation is clean.
+    // Better: Update the old one's expiry to 5 minutes from now.
+    await query(
+      `UPDATE RefreshTokens SET expires_at = DATE_ADD(NOW(), INTERVAL 5 MINUTE) WHERE token = ?`,
+      [token]
+    );
     await saveRefreshToken(decoded.id, newRefreshToken);
 
     return success(res, { accessToken, refreshToken: newRefreshToken });

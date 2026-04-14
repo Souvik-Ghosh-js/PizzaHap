@@ -1,19 +1,42 @@
 require('dotenv').config();
-const express    = require('express');
-const cors       = require('cors');
-const helmet     = require('helmet');
-const morgan     = require('morgan');
-const rateLimit  = require('express-rate-limit');
-const path       = require('path');
-const fs         = require('fs');
+const express = require('express');
+const http = require('http');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+const fs = require('fs');
+const { Server } = require('socket.io');
 
-const { getPool }   = require('./config/db');
-const routes        = require('./routes');
+const { getPool } = require('./config/db');
+const { setIO } = require('./config/socket');
+const routes = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
-const logger        = require('./utils/logger');
+const logger = require('./utils/logger');
 const { setupSwagger } = require('./swagger');
 
-const app  = express();
+const app = express();
+const server = http.createServer(app);
+
+// ─── SOCKET.IO ──────────────────────────────────────────────────
+const io = new Server(server, { cors: { origin: '*' } });
+setIO(io);
+
+io.on('connection', (socket) => {
+  // Admin joins a room based on their location so they only get relevant events
+  socket.on('join_admin', (locationId) => {
+    // Everyone joins 'admin_all' for truly global announcements
+    socket.join('admin_all');
+    if (locationId) {
+      socket.join(`admin_loc_${locationId}`);
+    } else {
+      // Super admins only join this room to get all location-specific events without duplication
+      socket.join('admin_super');
+    }
+  });
+});
+
 setupSwagger(app);
 
 const PORT = process.env.PORT || 5000;
@@ -74,7 +97,7 @@ app.use(errorHandler);
 const start = async () => {
   try {
     await getPool();
-    app.listen(PORT, () => {
+    server.listen(PORT, () => {
       logger.info(`🍕 PizzaHap Backend running on port ${PORT}`);
       console.log(`🍕 Server:  http://localhost:${PORT}`);
       console.log(`📋 Health:  http://localhost:${PORT}/health`);

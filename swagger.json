@@ -328,15 +328,41 @@
       "DeliveryRider": {
         "type": "object",
         "properties": {
-          "id": { "type": "integer" },
-          "name": { "type": "string", "example": "Amit Kumar" },
-          "phone": { "type": "string", "example": "9876543210" },
-          "email": { "type": "string", "example": "amit@pizzahap.com", "nullable": true },
-          "location_id": { "type": "integer", "nullable": true },
-          "location_name": { "type": "string", "nullable": true },
-          "is_active": { "type": "boolean" },
-          "created_at": { "type": "string", "format": "date-time" },
-          "updated_at": { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "example": "Amit Kumar"
+          },
+          "phone": {
+            "type": "string",
+            "example": "9876543210"
+          },
+          "email": {
+            "type": "string",
+            "example": "amit@pizzahap.com",
+            "nullable": true
+          },
+          "location_id": {
+            "type": "integer",
+            "nullable": true
+          },
+          "location_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "is_active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "Coupon": {
@@ -391,7 +417,9 @@
           },
           "applicable_product_ids": {
             "type": "array",
-            "items": { "type": "integer" },
+            "items": {
+              "type": "integer"
+            },
             "nullable": true,
             "description": "buy_1_get_1 only: product IDs eligible for the free item. null or empty = all products."
           },
@@ -715,18 +743,46 @@
       "AdminReview": {
         "type": "object",
         "properties": {
-          "id": { "type": "integer" },
-          "order_id": { "type": "integer" },
-          "food_rating": { "type": "integer" },
-          "delivery_rating": { "type": "integer", "nullable": true },
-          "overall_rating": { "type": "integer" },
-          "comment": { "type": "string", "nullable": true },
-          "created_at": { "type": "string", "format": "date-time" },
-          "order_number": { "type": "string" },
-          "location_id": { "type": "integer" },
-          "user_name": { "type": "string" },
-          "user_mobile": { "type": "string" },
-          "location_name": { "type": "string", "nullable": true }
+          "id": {
+            "type": "integer"
+          },
+          "order_id": {
+            "type": "integer"
+          },
+          "food_rating": {
+            "type": "integer"
+          },
+          "delivery_rating": {
+            "type": "integer",
+            "nullable": true
+          },
+          "overall_rating": {
+            "type": "integer"
+          },
+          "comment": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "order_number": {
+            "type": "string"
+          },
+          "location_id": {
+            "type": "integer"
+          },
+          "user_name": {
+            "type": "string"
+          },
+          "user_mobile": {
+            "type": "string"
+          },
+          "location_name": {
+            "type": "string",
+            "nullable": true
+          }
         }
       }
     }
@@ -1421,7 +1477,7 @@
                     },
                     "order_number": {
                       "type": "string",
-                      "example": "GOBT-123456"
+                      "example": "PIZZAHAP-123456"
                     },
                     "total_amount": {
                       "type": "number"
@@ -2416,23 +2472,35 @@
           {
             "in": "query",
             "name": "location_id",
-            "schema": { "type": "integer" },
+            "schema": {
+              "type": "integer"
+            },
             "description": "Filter by location (super_admin only)"
           },
           {
             "in": "query",
             "name": "min_rating",
-            "schema": { "type": "integer", "minimum": 1, "maximum": 5 }
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            }
           },
           {
             "in": "query",
             "name": "page",
-            "schema": { "type": "integer", "default": 1 }
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
           },
           {
             "in": "query",
             "name": "limit",
-            "schema": { "type": "integer", "default": 20 }
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
           }
         ],
         "responses": {
@@ -2443,12 +2511,18 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": { "type": "boolean" },
+                    "success": {
+                      "type": "boolean"
+                    },
                     "data": {
                       "type": "array",
-                      "items": { "$ref": "#/components/schemas/AdminReview" }
+                      "items": {
+                        "$ref": "#/components/schemas/AdminReview"
+                      }
                     },
-                    "pagination": { "$ref": "#/components/schemas/Pagination" }
+                    "pagination": {
+                      "$ref": "#/components/schemas/Pagination"
+                    }
                   }
                 }
               }
@@ -3040,14 +3114,22 @@
     },
     "/admin/riders": {
       "get": {
-        "tags": ["Admin — Riders"],
+        "tags": [
+          "Admin — Riders"
+        ],
         "summary": "List delivery riders (filtered to admin's location if location-scoped)",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
             "in": "query",
             "name": "location_id",
-            "schema": { "type": "integer" },
+            "schema": {
+              "type": "integer"
+            },
             "description": "super_admin only — filter by branch"
           }
         ],
@@ -3058,7 +3140,9 @@
               "application/json": {
                 "schema": {
                   "type": "array",
-                  "items": { "$ref": "#/components/schemas/DeliveryRider" }
+                  "items": {
+                    "$ref": "#/components/schemas/DeliveryRider"
+                  }
                 }
               }
             }
@@ -3066,20 +3150,39 @@
         }
       },
       "post": {
-        "tags": ["Admin — Riders"],
+        "tags": [
+          "Admin — Riders"
+        ],
         "summary": "Add a new delivery rider",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["name", "phone"],
+                "required": [
+                  "name",
+                  "phone"
+                ],
                 "properties": {
-                  "name": { "type": "string", "example": "Amit Kumar" },
-                  "phone": { "type": "string", "example": "9876543210" },
-                  "email": { "type": "string", "example": "amit@pizzahap.com", "nullable": true },
+                  "name": {
+                    "type": "string",
+                    "example": "Amit Kumar"
+                  },
+                  "phone": {
+                    "type": "string",
+                    "example": "9876543210"
+                  },
+                  "email": {
+                    "type": "string",
+                    "example": "amit@pizzahap.com",
+                    "nullable": true
+                  },
                   "location_id": {
                     "type": "integer",
                     "nullable": true,
@@ -3091,17 +3194,32 @@
           }
         },
         "responses": {
-          "201": { "description": "Delivery rider added" }
+          "201": {
+            "description": "Delivery rider added"
+          }
         }
       }
     },
     "/admin/riders/{id}": {
       "put": {
-        "tags": ["Admin — Riders"],
+        "tags": [
+          "Admin — Riders"
+        ],
         "summary": "Update rider details or toggle active status",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -3109,39 +3227,81 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string" },
-                  "phone": { "type": "string" },
-                  "email": { "type": "string", "nullable": true },
-                  "is_active": { "type": "boolean" },
-                  "location_id": { "type": "integer", "nullable": true }
+                  "name": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  },
+                  "location_id": {
+                    "type": "integer",
+                    "nullable": true
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Delivery rider updated" }
+          "200": {
+            "description": "Delivery rider updated"
+          }
         }
       },
       "delete": {
-        "tags": ["Admin — Riders"],
+        "tags": [
+          "Admin — Riders"
+        ],
         "summary": "Deactivate a delivery rider (soft delete — sets is_active = 0)",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Delivery rider deactivated" }
+          "200": {
+            "description": "Delivery rider deactivated"
+          }
         }
       }
     },
     "/admin/orders/{id}/rider": {
       "put": {
-        "tags": ["Admin — Orders"],
+        "tags": [
+          "Admin — Orders"
+        ],
         "summary": "Assign or unassign a delivery rider to an order",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "in": "path", "name": "id", "required": true, "schema": { "type": "integer" } }
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -3161,8 +3321,12 @@
           }
         },
         "responses": {
-          "200": { "description": "Rider assigned or unassigned. Adds a note to OrderStatusHistory." },
-          "404": { "description": "Rider not found or inactive" }
+          "200": {
+            "description": "Rider assigned or unassigned. Adds a note to OrderStatusHistory."
+          },
+          "404": {
+            "description": "Rider not found or inactive"
+          }
         }
       }
     },
@@ -3246,9 +3410,15 @@
                   },
                   "applicable_product_ids": {
                     "type": "array",
-                    "items": { "type": "integer" },
+                    "items": {
+                      "type": "integer"
+                    },
                     "nullable": true,
-                    "example": [3, 7, 12],
+                    "example": [
+                      3,
+                      7,
+                      12
+                    ],
                     "description": "buy_1_get_1 only: list of product IDs eligible for the free item. Omit or pass [] to apply to all products in the cart."
                   }
                 }

@@ -65,7 +65,7 @@ const validateCoupon = async (req, res, next) => {
     const { code, order_value } = req.body;
     const result = await query(
       `SELECT * FROM Coupons WHERE code = ? AND is_active = 1
-       AND valid_from <= NOW() AND valid_until >= NOW()
+       AND valid_from <= UTC_TIMESTAMP() AND valid_until >= UTC_TIMESTAMP()
        AND (usage_limit IS NULL OR used_count < usage_limit)`,
       [code.toUpperCase()]
     );
@@ -87,7 +87,7 @@ const validateCoupon = async (req, res, next) => {
     if (coupon.discount_type === 'percentage') {
       discount = Math.min((order_value * coupon.discount_value) / 100, coupon.max_discount || Infinity);
     } else if (coupon.discount_type === 'flat') {
-      discount = coupon.discount_value;
+      discount = parseFloat(coupon.discount_value);
     }
     // buy_1_get_1: calculated_discount = 0 here; actual discount computed at order time based on cheapest item
     const applicableIds = coupon.applicable_product_ids
@@ -106,9 +106,9 @@ const validateCoupon = async (req, res, next) => {
 const getActiveCoupons = async (req, res, next) => {
   try {
     const result = await query(
-      `SELECT code, description, discount_type, discount_value, min_order_value, valid_until
+      `SELECT code, description, discount_type, discount_value, min_order_value, valid_until, applicable_product_ids
        FROM Coupons
-       WHERE is_active = 1 AND valid_from <= NOW() AND valid_until >= NOW()
+       WHERE is_active = 1 AND valid_from <= UTC_TIMESTAMP() AND valid_until >= UTC_TIMESTAMP()
          AND (usage_limit IS NULL OR used_count < usage_limit)
        ORDER BY created_at DESC`
     );

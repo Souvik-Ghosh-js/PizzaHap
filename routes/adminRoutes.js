@@ -20,6 +20,11 @@ const {
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
   sendNotificationToUsers,
   adminGetReviews,
+  adminGetBanners, createBanner, updateBanner, deleteBanner,
+  getLocationGeofence, saveLocationGeofence,
+  getLocationPricing, setLocationPricing, deleteLocationPricing,
+  getSizePricing, setSizePricing, deleteSizePricing,
+  getAllAdmins, createAdminAccount, updateAdminAccount, deleteAdminAccount,
 } = require('../controllers/adminController');
 const { getAllRefunds, processRefund } = require('../controllers/refundController');
 const { adminGetAllTickets, adminReplyTicket } = require('../controllers/supportController');
@@ -67,7 +72,7 @@ router.put('/orders/:id/payment-status', [body('payment_status').notEmpty()], va
 router.get('/orders/:id/invoice', generateInvoice);
 
 // In-house billing
-router.post('/orders/inhouse', requireRole('super_admin', 'admin'), [
+router.post('/orders/inhouse', requireRole('super_admin', 'admin', 'staff'), [
   body('items').isArray({ min: 1 }),
   body('customer_name').optional().trim(),
   body('customer_phone').optional().trim(),
@@ -75,12 +80,12 @@ router.post('/orders/inhouse', requireRole('super_admin', 'admin'), [
 ], validate, adminPlaceOrder);
 
 // Assign rider to order
-router.put('/orders/:id/rider', requireRole('super_admin', 'admin'), [
+router.put('/orders/:id/rider', requireRole('super_admin', 'admin', 'staff'), [
   body('rider_id').optional({ nullable: true }).isInt(),
 ], validate, assignRiderToOrder);
 
 // Accept / Reject a pending order
-router.put('/orders/:id/accept-reject', requireRole('super_admin', 'admin'), [
+router.put('/orders/:id/accept-reject', requireRole('super_admin', 'admin', 'staff'), [
   body('action').isIn(['accept', 'reject']).withMessage('action must be accept or reject'),
   body('reason').optional().trim(),
 ], validate, acceptRejectOrder);
@@ -186,5 +191,48 @@ router.post('/support/tickets/:id/reply', [body('message').trim().notEmpty()], v
 
 // ── Reviews ─────────────────────────────────────────────────
 router.get('/reviews', adminGetReviews);
+
+// ── Banners ──────────────────────────────────────────────────────
+router.get('/banners', adminGetBanners);
+router.post('/banners', requireRole('super_admin', 'admin'), [
+  body('badge_text').trim().notEmpty(),
+  body('title_text').trim().notEmpty(),
+], validate, createBanner);
+router.put('/banners/:id', requireRole('super_admin', 'admin'), updateBanner);
+router.delete('/banners/:id', requireRole('super_admin', 'admin'), deleteBanner);
+
+// ── Location Geofences ───────────────────────────────────────────
+router.get('/locations/:id/geofence', getLocationGeofence);
+router.put('/locations/:id/geofence', requireRole('super_admin'), saveLocationGeofence);
+
+// ── Location Pricing ─────────────────────────────────────────────
+router.get('/pricing/:locationId', getLocationPricing);
+router.post('/pricing', requireRole('super_admin', 'admin'), [
+  body('type').isIn(['size', 'crust', 'topping']),
+  body('item_id').isInt(),
+  body('location_id').isInt(),
+  body('price').isNumeric(),
+], validate, setLocationPricing);
+router.delete('/pricing/:id', requireRole('super_admin', 'admin'), deleteLocationPricing);
+
+// ── Size-based Pricing (Crusts/Toppings by size) ─────────────────
+router.get('/size-pricing', getSizePricing);
+router.post('/size-pricing', requireRole('super_admin', 'admin'), [
+  body('type').isIn(['crust', 'topping']),
+  body('item_id').isInt(),
+  body('size_code').trim().notEmpty(),
+  body('price').isNumeric(),
+], validate, setSizePricing);
+router.delete('/size-pricing/:id', requireRole('super_admin', 'admin'), deleteSizePricing);
+
+// ── Admin Management (Super Admin only) ──────────────────────────
+router.get('/manage-admins', requireRole('super_admin'), getAllAdmins);
+router.post('/manage-admins', requireRole('super_admin'), [
+  body('name').trim().notEmpty(),
+  body('email').isEmail(),
+  body('password').isLength({ min: 6 }),
+], validate, createAdminAccount);
+router.put('/manage-admins/:id', requireRole('super_admin'), updateAdminAccount);
+router.delete('/manage-admins/:id', requireRole('super_admin'), deleteAdminAccount);
 
 module.exports = router;

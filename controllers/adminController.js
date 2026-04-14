@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 const { query, transaction } = require('../config/db');
+const { normalizeEmail } = require('../services/otpService');
 const { success, created, badRequest, notFound, paginated, unauthorized } = require('../utils/response');
 const { notifyUser, notifyAdmins, creditCoins, revertCoins } = require('../services/notificationService');
 const { sendOrderStatusEmail, sendRiderAssignmentEmail } = require('../services/otpService');
@@ -11,7 +12,8 @@ const { sendOrderStatusEmail, sendRiderAssignmentEmail } = require('../services/
 const adminLogin = async (req, res, next) => {
   try {
     const { email, password, location_id } = req.body;
-    const rows = await query(`SELECT * FROM Admins WHERE email = ? AND is_active = 1`, [email]);
+    const normalizedEmail = normalizeEmail(email);
+    const rows = await query(`SELECT * FROM Admins WHERE email = ? AND is_active = 1`, [normalizedEmail]);
     if (!rows.length) return unauthorized(res, 'Invalid credentials');
     const admin = rows[0];
     if (!await bcrypt.compare(password, admin.password_hash)) return unauthorized(res, 'Invalid credentials');
@@ -35,7 +37,9 @@ const adminLogin = async (req, res, next) => {
 // ── Dashboard ─────────────────────────────────────────────────────
 const getDashboard = async (req, res, next) => {
   try {
-    const lid = req.admin.location_id;
+    const lid = (req.admin.role === 'super_admin' && req.query.location_id !== undefined)
+      ? (req.query.location_id ? parseInt(req.query.location_id) : null)
+      : req.admin.location_id;
     const lf = lid ? ` AND location_id = ${parseInt(lid)}` : '';
     const olF = lid ? ` AND o.location_id = ${parseInt(lid)}` : '';
     const [todayOrders, totalRevenue, newUsers, pendingOrders, popularProducts] = await Promise.all([
@@ -58,8 +62,10 @@ const getDashboard = async (req, res, next) => {
 
 const getReports = async (req, res, next) => {
   try {
-    const { period = 'daily' } = req.query;
-    const lid = req.admin.location_id;
+    const { period = 'daily', location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     const lf = lid ? ` AND location_id = ${parseInt(lid)}` : '';
     let groupBy;
     if (period === 'daily') groupBy = `DATE(created_at)`;
@@ -79,11 +85,13 @@ const getReports = async (req, res, next) => {
 // ── Orders ────────────────────────────────────────────────────────
 const adminGetOrders = async (req, res, next) => {
   try {
-    const { status, payment_status } = req.query;
+    const { status, payment_status, location_id } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
-    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
     if (status) { where += ' AND o.status = ?'; params.push(status); }
@@ -106,7 +114,10 @@ const adminGetOrders = async (req, res, next) => {
 
 const adminGetOrderDetail = async (req, res, next) => {
   try {
-    const lid = req.admin.location_id;
+    const { location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = `WHERE o.id = ?`;
     const params = [req.params.id];
     if (lid) { where += ` AND o.location_id = ?`; params.push(lid); }
@@ -154,6 +165,12 @@ const updateOrderStatus = async (req, res, next) => {
       [req.params.id]
     );
     if (!orderRow) return notFound(res, 'Order not found');
+
+    const lid = req.admin.location_id;
+    if (lid && orderRow.location_id !== lid) {
+      return unauthorized(res, 'You do not have permission to update this order');
+    }
+
     if (!transitions[orderRow.status]?.includes(status)) {
       return badRequest(res, `Cannot transition from '${orderRow.status}' to '${status}'`);
     }
@@ -180,9 +197,9 @@ const updateOrderStatus = async (req, res, next) => {
       await sendOrderStatusEmail(orderRow.user_email, orderRow.order_number, status);
     }
 
-    // Credit coins on delivery: 1 coin per Rs.10
-    if (status === 'delivered' && orderRow.user_id) {
-      const coinsEarned = Math.floor(orderRow.total_amount / 10);
+    // Credit coins on delivery: 1 coin per Rs.10 (Only for orders above 300)
+    if (status === 'delivered' && orderRow.user_id && orderRow.subtotal > 300) {
+      const coinsEarned = Math.floor(orderRow.subtotal / 10);
       if (coinsEarned > 0) await creditCoins(orderRow.user_id, orderRow.id, coinsEarned);
     }
 
@@ -231,31 +248,34 @@ const adminPlaceOrder = async (req, res, next) => {
 
     for (const item of items) {
       let productResult;
-      
+
       // Handle products with sizes vs without sizes
       if (item.size_id) {
-        // Product has a size - use the size price
+        // Product has a size - use location-aware pricing
         productResult = await query(
-          `SELECT p.*, ps.price as size_price, ps.size_name,
-                  ct.extra_price as crust_extra, ct.name as crust_name
+          `SELECT p.*, COALESCE(plp.price, ps.price) as size_price, ps.size_name,
+                  COALESCE(clp.extra_price, ct.extra_price) as crust_extra, ct.name as crust_name
            FROM Products p
            JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
+           LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ?
            LEFT JOIN CrustTypes ct ON ct.id = ?
+           LEFT JOIN CrustLocationPricing clp ON clp.crust_id = ct.id AND clp.location_id = ?
            WHERE p.id = ? AND p.is_available = 1`,
-          [item.size_id, item.crust_id || null, item.product_id]
+          [item.size_id, resolvedLocationId, item.crust_id || null, resolvedLocationId, item.product_id]
         );
       } else {
         // Product doesn't have sizes - use base_price
         productResult = await query(
           `SELECT p.*, p.base_price as size_price, NULL as size_name,
-                  ct.extra_price as crust_extra, ct.name as crust_name
+                  COALESCE(clp.extra_price, ct.extra_price) as crust_extra, ct.name as crust_name
            FROM Products p
            LEFT JOIN CrustTypes ct ON ct.id = ?
+           LEFT JOIN CrustLocationPricing clp ON clp.crust_id = ct.id AND clp.location_id = ?
            WHERE p.id = ? AND p.is_available = 1`,
-          [item.crust_id || null, item.product_id]
+          [item.crust_id || null, resolvedLocationId, item.product_id]
         );
       }
-      
+
       if (!productResult.length) {
         console.log('Product not found with params:', {
           size_id: item.size_id,
@@ -264,9 +284,9 @@ const adminPlaceOrder = async (req, res, next) => {
         });
         return badRequest(res, `Product ${item.product_id} not available`);
       }
-      
+
       const product = productResult[0];
-      
+
       // Stock check
       if (product.stock_quantity < (item.quantity || 1)) {
         return badRequest(res, `Insufficient stock for ${product.name}. Available: ${product.stock_quantity}`);
@@ -274,31 +294,37 @@ const adminPlaceOrder = async (req, res, next) => {
 
       let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
       const itemToppings = [];
-      
+
       if (item.toppings?.length) {
         for (const tid of item.toppings) {
-          const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
-          if (tr.length) { 
-            itemPrice += parseFloat(tr[0].price); 
-            itemToppings.push(tr[0]); 
+          const tr = await query(
+            `SELECT t.*, COALESCE(tlp.price, t.price) as effective_price
+             FROM Toppings t
+             LEFT JOIN ToppingLocationPricing tlp ON tlp.topping_id = t.id AND tlp.location_id = ?
+             WHERE t.id = ? AND t.is_available = 1`,
+            [resolvedLocationId, tid]
+          );
+          if (tr.length) {
+            itemPrice += parseFloat(tr[0].effective_price);
+            itemToppings.push({ ...tr[0], price: tr[0].effective_price });
           }
         }
       }
-      
+
       const total_price = parseFloat((itemPrice * (item.quantity || 1)).toFixed(2));
       subtotal += total_price;
-      
-      orderItems.push({ 
-        ...item, 
-        product, 
-        unit_price: itemPrice, 
-        total_price, 
-        toppings: itemToppings 
+
+      orderItems.push({
+        ...item,
+        product,
+        unit_price: itemPrice,
+        total_price,
+        toppings: itemToppings
       });
     }
 
     subtotal = parseFloat(subtotal.toFixed(2));
-    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);
+    const delivery_fee = delivery_type === 'pickup' ? 0 : (subtotal < 300 ? 40 : 0);//changed here delivery fee
 
     // ── Coupon discount ───────────────────────────────────────────
     let discount_amount = 0;
@@ -306,7 +332,7 @@ const adminPlaceOrder = async (req, res, next) => {
     if (coupon_code) {
       const couponResult = await query(
         `SELECT * FROM Coupons WHERE code = ? AND is_active = 1
-         AND valid_from <= NOW() AND valid_until >= NOW()
+         AND valid_from <= UTC_TIMESTAMP() AND valid_until >= UTC_TIMESTAMP()
          AND (usage_limit IS NULL OR used_count < usage_limit)`,
         [coupon_code.toUpperCase()]
       );
@@ -344,9 +370,9 @@ const adminPlaceOrder = async (req, res, next) => {
            customer_name, customer_phone)
          VALUES (?,?,?,?,?,?,?,?,0,?,?,?,'pending',?,?,?)`,
         [order_number, user_id || null, resolvedLocationId, delivery_type,
-         delivery_address || null, subtotal, discount_amount, delivery_fee, total_amount,
-         couponId || null, special_instructions || null, payment_method,
-         customer_name || null, customer_phone || null]
+          delivery_address || null, subtotal, discount_amount, delivery_fee, total_amount,
+          couponId || null, special_instructions || null, payment_method,
+          customer_name || null, customer_phone || null]
       );
       const newOrderId = orderResult.insertId;
 
@@ -357,11 +383,11 @@ const adminPlaceOrder = async (req, res, next) => {
              crust_id, crust_name, quantity, unit_price, total_price)
            VALUES (?,?,?,?,?,?,?,?,?,?)`,
           [newOrderId, item.product_id, item.product.name, item.size_id || null,
-           item.product.size_name || 'Regular', item.crust_id || null, 
-           item.product.crust_name || null, item.quantity || 1, 
-           parseFloat(item.unit_price).toFixed(2), item.total_price]
+            item.product.size_name || 'Regular', item.crust_id || null,
+            item.product.crust_name || null, item.quantity || 1,
+            parseFloat(item.unit_price).toFixed(2), item.total_price]
         );
-        
+
         for (const topping of item.toppings) {
           await conn.execute(
             `INSERT INTO OrderItemToppings (order_item_id, topping_id, topping_name, price) VALUES (?,?,?,?)`,
@@ -423,9 +449,9 @@ const adminPlaceOrder = async (req, res, next) => {
     }
 
     return created(res, { order_id: orderId, order_number, subtotal, discount_amount, total_amount, payment_method }, 'In-house order created');
-  } catch (err) { 
+  } catch (err) {
     console.error('Order placement error:', err);
-    next(err); 
+    next(err);
   }
 };
 
@@ -533,35 +559,49 @@ const uploadCategoryImage = async (req, res, next) => {
 // ── Products CRUD ─────────────────────────────────────────────────
 const adminGetProducts = async (req, res, next) => {
   try {
-    const { search, category_id, show_unavailable } = req.query;
+    const { search, category_id, show_unavailable, location_id } = req.query;
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit) || 50));
     const offset = (page - 1) * limit;
-    const lid = req.admin.location_id;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
     if (show_unavailable !== 'true') { where += ` AND p.is_available = 1`; }
     if (category_id) { where += ` AND p.category_id = ?`; params.push(parseInt(category_id)); }
     if (search) { where += ` AND (p.name LIKE ? OR p.description LIKE ?)`; params.push(`%${search}%`, `%${search}%`); }
-    let locSelect = '', locJoin = '';
-    if (lid) {
-      locJoin = `LEFT JOIN ProductLocationAvailability pla ON pla.product_id = p.id AND pla.location_id = ${parseInt(lid)}`;
-      locSelect = `, COALESCE(pla.is_available, 1) as location_available`;
-    }
+
+    const lidSql = lid ? parseInt(lid) : 'NULL';
+    const locPriceSelect = `,
+              (
+                SELECT COALESCE(MIN(COALESCE(plp.price, ps.price)), p.base_price)
+                FROM ProductSizes ps
+                LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ${lidSql}
+                WHERE ps.product_id = p.id AND ps.is_available = 1
+              ) as min_price,
+              EXISTS(SELECT 1 FROM ProductLocationAvailability pla WHERE pla.product_id = p.id AND pla.location_id = ${lidSql}) as is_hidden`;
+
     const [countRes, rows] = await Promise.all([
-      query(`SELECT COUNT(*) as total FROM Products p ${locJoin} ${where}`, params),
+      query(`SELECT COUNT(*) as total FROM Products p ${where}`, params),
       query(
-        `SELECT p.*, c.name as category_name${locSelect}
+        `SELECT p.*, c.name as category_name, 1 as location_available${locPriceSelect}
          FROM Products p
          LEFT JOIN Categories c ON p.category_id = c.id
-         ${locJoin}
          ${where}
          ORDER BY p.category_id, p.sort_order, p.name
          LIMIT ${limit} OFFSET ${offset}`,
         params
       ),
     ]);
-    return paginated(res, rows, countRes[0].total, page, limit);
+
+    const processedRows = rows.map(r => ({
+      ...r,
+      base_price: r.min_price !== null ? r.min_price : r.base_price,
+      location_available: !r.is_hidden
+    })).filter(r => r.location_available);
+
+    return paginated(res, processedRows, countRes[0].total, page, limit);
   } catch (err) { next(err); }
 };
 
@@ -612,6 +652,10 @@ const updateProduct = async (req, res, next) => {
         req.params.id,
       ]
     );
+    if (base_price != null) {
+      // Sync regular size price if it exists
+      await query(`UPDATE ProductSizes SET price = ? WHERE product_id = ? AND size_code = 'regular'`, [parseFloat(base_price), req.params.id]);
+    }
     return success(res, {}, 'Product updated');
   } catch (err) { next(err); }
 };
@@ -671,8 +715,44 @@ const getProductAvailabilityMatrix = async (req, res, next) => {
 // ── Product Sizes CRUD ────────────────────────────────────────────
 const adminGetProductSizes = async (req, res, next) => {
   try {
-    const rows = await query(`SELECT * FROM ProductSizes WHERE product_id = ? ORDER BY price`, [req.params.id]);
-    return success(res, rows);
+    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    
+    // 1. Get sizes
+    let rows;
+    if (lid) {
+      rows = await query(
+        `SELECT ps.*, plp.price as location_price, COALESCE(plp.price, ps.price) as effective_price
+         FROM ProductSizes ps
+         LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ?
+         WHERE ps.product_id = ? ORDER BY ps.price`,
+        [lid, req.params.id]
+      );
+    } else {
+      rows = await query(`SELECT *, NULL as location_price, price as effective_price FROM ProductSizes WHERE product_id = ? ORDER BY price`, [req.params.id]);
+    }
+
+    // 2. Get crust/topping size matrix for this branch
+    const [crustPricing, toppingPricing] = await Promise.all([
+      lid ? query(
+        `SELECT csp.crust_id, csp.size_code, COALESCE(clsp.extra_price, csp.extra_price) as extra_price
+         FROM CrustSizePricing csp
+         LEFT JOIN CrustLocationSizePricing clsp ON clsp.crust_id = csp.crust_id AND clsp.size_code = csp.size_code AND clsp.location_id = ?`,
+        [lid]
+      ) : query(`SELECT crust_id, size_code, extra_price FROM CrustSizePricing`),
+      
+      lid ? query(
+        `SELECT tsp.topping_id, tsp.size_code, COALESCE(tlsp.price, tsp.price) as price
+         FROM ToppingSizePricing tsp
+         LEFT JOIN ToppingLocationSizePricing tlsp ON tlsp.topping_id = tsp.topping_id AND tlsp.size_code = tsp.size_code AND tlsp.location_id = ?`,
+        [lid]
+      ) : query(`SELECT topping_id, size_code, price FROM ToppingSizePricing`)
+    ]);
+
+    return success(res, {
+      sizes: rows,
+      crust_pricing: crustPricing,
+      topping_pricing: toppingPricing
+    });
   } catch (err) { next(err); }
 };
 
@@ -718,7 +798,18 @@ const deleteProductSize = async (req, res, next) => {
 // ── Toppings CRUD ─────────────────────────────────────────────────
 const adminGetToppings = async (req, res, next) => {
   try {
-    const rows = await query(`SELECT * FROM Toppings ORDER BY sort_order, name`);
+    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    if (lid) {
+      const rows = await query(
+        `SELECT t.*, COALESCE(tlp.price, t.price) as price, COALESCE(tlp.price, t.price) as effective_price
+         FROM Toppings t
+         LEFT JOIN ToppingLocationPricing tlp ON tlp.topping_id = t.id AND tlp.location_id = ?
+         ORDER BY t.sort_order, t.name`,
+        [lid]
+      );
+      return success(res, rows);
+    }
+    const rows = await query(`SELECT *, price as effective_price FROM Toppings ORDER BY sort_order, name`);
     return success(res, rows);
   } catch (err) { next(err); }
 };
@@ -768,7 +859,18 @@ const deleteTopping = async (req, res, next) => {
 // ── Crust Types CRUD ──────────────────────────────────────────────
 const adminGetCrusts = async (req, res, next) => {
   try {
-    const rows = await query(`SELECT * FROM CrustTypes ORDER BY sort_order, name`);
+    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    if (lid) {
+      const rows = await query(
+        `SELECT c.*, COALESCE(clp.extra_price, c.extra_price) as extra_price, COALESCE(clp.extra_price, c.extra_price) as effective_extra_price
+         FROM CrustTypes c
+         LEFT JOIN CrustLocationPricing clp ON clp.crust_id = c.id AND clp.location_id = ?
+         ORDER BY c.sort_order, c.name`,
+        [lid]
+      );
+      return success(res, rows);
+    }
+    const rows = await query(`SELECT *, extra_price as effective_extra_price FROM CrustTypes ORDER BY sort_order, name`);
     return success(res, rows);
   } catch (err) { next(err); }
 };
@@ -857,7 +959,10 @@ const updateLocation = async (req, res, next) => {
 // ── Delivery Riders CRUD ──────────────────────────────────────────
 const getDeliveryRiders = async (req, res, next) => {
   try {
-    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
+    const { location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
     if (lid) { where += ' AND location_id = ?'; params.push(lid); }
@@ -894,9 +999,9 @@ const updateDeliveryRider = async (req, res, next) => {
          updated_at  = NOW()
        WHERE id = ?`,
       [name || null, phone || null, email || null,
-       is_active != null ? (is_active ? 1 : 0) : null,
-       location_id ? parseInt(location_id) : null,
-       req.params.id]
+      is_active != null ? (is_active ? 1 : 0) : null,
+      location_id ? parseInt(location_id) : null,
+      req.params.id]
     );
     return success(res, {}, 'Delivery rider updated');
   } catch (err) { next(err); }
@@ -926,6 +1031,7 @@ const assignRiderToOrder = async (req, res, next) => {
 
     if (rider_id) {
       const [rider] = await query(`SELECT name, email FROM DeliveryRiders WHERE id = ?`, [rider_id]);
+<<<<<<< HEAD
       const [order] = await query(
         `SELECT o.order_number, o.delivery_address, o.total_amount, o.delivery_type,
                 u.mobile as customer_mobile, u.name as customer_name
@@ -938,6 +1044,9 @@ const assignRiderToOrder = async (req, res, next) => {
         `SELECT product_name, size_name, quantity, total_price FROM OrderItems WHERE order_id = ?`,
         [orderId]
       );
+=======
+      const [order] = await query(`SELECT order_number, delivery_address FROM Orders WHERE id = ?`, [orderId]);
+>>>>>>> 98d07ecc184b6511ffb6237da1bc7015b07a40e5
 
       await query(
         `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
@@ -977,12 +1086,16 @@ const createCoupon = async (req, res, next) => {
     const productIds = Array.isArray(applicable_product_ids) && applicable_product_ids.length > 0
       ? JSON.stringify(applicable_product_ids.map(Number))
       : null;
+    const fromDate = new Date(valid_from);
+    fromDate.setDate(fromDate.getDate() - 1);
+    const untilDate = new Date(valid_until);
+
     await query(
       `INSERT INTO Coupons (code, description, discount_type, discount_value, min_order_value, max_discount, usage_limit, per_user_limit, valid_from, valid_until, applicable_product_ids)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [code.toUpperCase(), description || null, discount_type, resolvedDiscountValue,
       min_order_value || 0, max_discount || null, usage_limit || null,
-      per_user_limit || 1, new Date(valid_from), new Date(valid_until), productIds]
+      per_user_limit || 1, fromDate, untilDate, productIds]
     );
     return created(res, {}, 'Coupon created');
   } catch (err) { next(err); }
@@ -1016,13 +1129,15 @@ const updateCoupon = async (req, res, next) => {
 // ── Accept / Reject Order ────────────────────────────────────────
 const acceptRejectOrder = async (req, res, next) => {
   try {
-    const { action, reason } = req.body;
+    const { action, reason, location_id } = req.body;
     if (!['accept', 'reject'].includes(action)) return badRequest(res, 'action must be accept or reject');
     const orderId = req.params.id;
-    const lid = req.admin.location_id;
-    let where = `WHERE id = ?`;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
+    let where = `WHERE o.id = ?`;
     const params = [orderId];
-    if (lid) { where += ` AND location_id = ?`; params.push(lid); }
+    if (lid) { where += ` AND o.location_id = ?`; params.push(lid); }
     const [orderRow] = await query(
       `SELECT o.*, u.email as user_email FROM Orders o
        LEFT JOIN Users u ON o.user_id = u.id
@@ -1071,7 +1186,7 @@ const acceptRejectOrder = async (req, res, next) => {
         await notifyUser(orderRow.user_id, 'Order Rejected',
           `Sorry, your order ${orderRow.order_number} was rejected. Reason: ${cancelReason}`,
           'order', { order_id: orderRow.id, order_number: orderRow.order_number, status: 'cancelled' });
-        
+
         // Email notification
         if (orderRow.user_email) {
           await sendOrderStatusEmail(orderRow.user_email, orderRow.order_number, 'cancelled');
@@ -1085,16 +1200,18 @@ const acceptRejectOrder = async (req, res, next) => {
 // ── Reviews / Feedback ────────────────────────────────────────────
 const adminGetReviews = async (req, res, next) => {
   try {
-    const page  = Math.max(1, parseInt(req.query.page) || 1);
+    const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const offset = (page - 1) * limit;
-    const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
-    const { min_rating, max_rating } = req.query;
+    const { min_rating, max_rating, location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
     let where = 'WHERE 1=1';
     const params = [];
-    if (lid)         { where += ' AND o.location_id = ?';        params.push(lid); }
-    if (min_rating)  { where += ' AND f.overall_rating >= ?';    params.push(parseInt(min_rating)); }
-    if (max_rating)  { where += ' AND f.overall_rating <= ?';    params.push(parseInt(max_rating)); }
+    if (lid) { where += ' AND o.location_id = ?'; params.push(lid); }
+    if (min_rating) { where += ' AND f.overall_rating >= ?'; params.push(parseInt(min_rating)); }
+    if (max_rating) { where += ' AND f.overall_rating <= ?'; params.push(parseInt(max_rating)); }
     const [countRes, rows] = await Promise.all([
       query(`SELECT COUNT(*) as total FROM OrderFeedback f JOIN Orders o ON f.order_id = o.id ${where}`, params),
       query(
@@ -1119,11 +1236,22 @@ const adminGetReviews = async (req, res, next) => {
 // ── Admin Notifications ───────────────────────────────────────────
 const getAdminNotifications = async (req, res, next) => {
   try {
-    const lid = req.admin.location_id;
-    let where = `WHERE (an.admin_id = ?`;
-    const params = [req.admin.id];
-    if (lid) { where += ` OR an.location_id = ?`; params.push(lid); }
-    where += `)`;
+    const { location_id } = req.query;
+    const lid = (req.admin.role === 'super_admin' && location_id !== undefined)
+      ? (location_id ? parseInt(location_id) : null)
+      : req.admin.location_id;
+
+    let where = 'WHERE 1=1';
+    const params = [];
+    if (lid) {
+      // Branch-specific mode: Show only notifications for this location or dedicated to this admin
+      where += ` AND (an.location_id = ? OR (an.location_id IS NULL AND an.admin_id = ?))`;
+      params.push(lid, req.admin.id);
+    } else {
+      // All Branches mode: Show all notifications except specifically for other admins
+      where += ` AND (an.admin_id = ? OR an.admin_id IS NULL)`;
+      params.push(req.admin.id);
+    }
     const rows = await query(
       `SELECT an.* FROM AdminNotifications an ${where} ORDER BY an.created_at DESC LIMIT 100`, params
     );
@@ -1166,6 +1294,342 @@ const sendNotificationToUsers = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ── Banners CRUD ─────────────────────────────────────────────────
+const adminGetBanners = async (req, res, next) => {
+  try {
+    const rows = await query(`SELECT * FROM Banners ORDER BY sort_order, id`);
+    return success(res, rows);
+  } catch (err) { next(err); }
+};
+
+const createBanner = async (req, res, next) => {
+  try {
+    const { badge_text, title_text, gradient_start, gradient_end, icon_name, sort_order, is_active, valid_from, valid_until } = req.body;
+    const r = await query(
+      `INSERT INTO Banners (badge_text, title_text, gradient_start, gradient_end, icon_name, sort_order, is_active, valid_from, valid_until)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      [badge_text, title_text, gradient_start || '#991515', gradient_end || '#FF6B35',
+       icon_name || 'local_offer', sort_order || 0, is_active != null ? (is_active ? 1 : 0) : 1,
+       valid_from || null, valid_until || null]
+    );
+    return created(res, { banner_id: r.insertId }, 'Banner created');
+  } catch (err) { next(err); }
+};
+
+const updateBanner = async (req, res, next) => {
+  try {
+    const { badge_text, title_text, gradient_start, gradient_end, icon_name, sort_order, is_active, valid_from, valid_until } = req.body;
+    await query(
+      `UPDATE Banners SET
+         badge_text     = IFNULL(?,badge_text),
+         title_text     = IFNULL(?,title_text),
+         gradient_start = IFNULL(?,gradient_start),
+         gradient_end   = IFNULL(?,gradient_end),
+         icon_name      = IFNULL(?,icon_name),
+         sort_order     = IFNULL(?,sort_order),
+         is_active      = IFNULL(?,is_active),
+         valid_from     = ?,
+         valid_until    = ?
+       WHERE id = ?`,
+      [badge_text || null, title_text || null, gradient_start || null, gradient_end || null,
+       icon_name || null, sort_order != null ? sort_order : null,
+       is_active != null ? (is_active ? 1 : 0) : null,
+       valid_from || null, valid_until || null, req.params.id]
+    );
+    return success(res, {}, 'Banner updated');
+  } catch (err) { next(err); }
+};
+
+const deleteBanner = async (req, res, next) => {
+  try {
+    await query(`DELETE FROM Banners WHERE id = ?`, [req.params.id]);
+    return success(res, {}, 'Banner deleted');
+  } catch (err) { next(err); }
+};
+
+// ── Location Geofences ───────────────────────────────────────────
+const getLocationGeofence = async (req, res, next) => {
+  try {
+    const rows = await query(`SELECT * FROM LocationGeofences WHERE location_id = ?`, [req.params.id]);
+    return success(res, rows.length ? rows[0] : null);
+  } catch (err) { next(err); }
+};
+
+const saveLocationGeofence = async (req, res, next) => {
+  try {
+    const { polygon_coordinates } = req.body;
+    if (!polygon_coordinates || !Array.isArray(polygon_coordinates) || polygon_coordinates.length < 3) {
+      return badRequest(res, 'At least 3 polygon points required');
+    }
+    await query(
+      `INSERT INTO LocationGeofences (location_id, polygon_coordinates)
+       VALUES (?, ?) ON DUPLICATE KEY UPDATE polygon_coordinates = VALUES(polygon_coordinates)`,
+      [req.params.id, JSON.stringify(polygon_coordinates)]
+    );
+    return success(res, {}, 'Geofence saved');
+  } catch (err) { next(err); }
+};
+
+// ── Location Pricing ─────────────────────────────────────────────
+const getLocationPricing = async (req, res, next) => {
+  try {
+    const locationId = parseInt(req.params.locationId);
+    const [sizePricing, crustPricing, toppingPricing, crustSizePricing, toppingSizePricing] = await Promise.all([
+      query(
+        `SELECT plp.*, ps.size_name, ps.price as default_price, p.name as product_name
+         FROM ProductLocationPricing plp
+         JOIN ProductSizes ps ON ps.id = plp.product_size_id
+         JOIN Products p ON p.id = ps.product_id
+         WHERE plp.location_id = ?
+         ORDER BY p.name, ps.size_name`, [locationId]
+      ),
+      query(
+        `SELECT clp.*, ct.name as crust_name, ct.extra_price as default_extra_price
+         FROM CrustLocationPricing clp
+         JOIN CrustTypes ct ON ct.id = clp.crust_id
+         WHERE clp.location_id = ?
+         ORDER BY ct.name`, [locationId]
+      ),
+      query(
+        `SELECT tlp.*, t.name as topping_name, t.price as default_price
+         FROM ToppingLocationPricing tlp
+         JOIN Toppings t ON t.id = tlp.topping_id
+         WHERE tlp.location_id = ?
+         ORDER BY t.name`, [locationId]
+      ),
+      query(`SELECT clsp.* FROM CrustLocationSizePricing clsp WHERE clsp.location_id = ?`, [locationId]),
+      query(`SELECT tlsp.* FROM ToppingLocationSizePricing tlsp WHERE tlsp.location_id = ?`, [locationId]),
+    ]);
+    return success(res, {
+      sizes: sizePricing,
+      crusts: crustPricing,
+      toppings: toppingPricing,
+      crust_size_overrides: crustSizePricing,
+      topping_size_overrides: toppingSizePricing
+    });
+  } catch (err) { next(err); }
+};
+
+const setLocationPricing = async (req, res, next) => {
+  try {
+    const { type, item_id, location_id, price, size_code } = req.body;
+    if (!type || !item_id || !location_id || price == null) {
+      return badRequest(res, 'type, item_id, location_id, and price are required');
+    }
+    if (type === 'size') {
+      await query(
+        `INSERT INTO ProductLocationPricing (product_size_id, location_id, price) VALUES (?,?,?)
+         ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+        [item_id, location_id, price]
+      );
+    } else if (type === 'crust') {
+      if (size_code) {
+        await query(
+          `INSERT INTO CrustLocationSizePricing (crust_id, location_id, size_code, extra_price) VALUES (?,?,?,?)
+           ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+          [item_id, location_id, size_code, price]
+        );
+      } else {
+        await query(
+          `INSERT INTO CrustLocationPricing (crust_id, location_id, extra_price) VALUES (?,?,?)
+           ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+          [item_id, location_id, price]
+        );
+      }
+    } else if (type === 'topping') {
+      if (size_code) {
+        await query(
+          `INSERT INTO ToppingLocationSizePricing (topping_id, location_id, size_code, price) VALUES (?,?,?,?)
+           ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+          [item_id, location_id, size_code, price]
+        );
+      } else {
+        await query(
+          `INSERT INTO ToppingLocationPricing (topping_id, location_id, price) VALUES (?,?,?)
+           ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+          [item_id, location_id, price]
+        );
+      }
+    } else {
+      return badRequest(res, 'type must be size, crust, or topping');
+    }
+    return success(res, {}, 'Location pricing saved');
+  } catch (err) { next(err); }
+};
+
+const deleteLocationPricing = async (req, res, next) => {
+  try {
+    const { type, location_id, size_code } = req.query;
+    const item_id = req.params.id;
+    if (!type || !location_id) return badRequest(res, 'type and location_id query params required');
+    
+    if (type === 'size') {
+      await query(`DELETE FROM ProductLocationPricing WHERE product_size_id = ? AND location_id = ?`, [item_id, location_id]);
+    } else if (type === 'crust') {
+      if (size_code) await query(`DELETE FROM CrustLocationSizePricing WHERE crust_id = ? AND location_id = ? AND size_code = ?`, [item_id, location_id, size_code]);
+      else await query(`DELETE FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`, [item_id, location_id]);
+    } else if (type === 'topping') {
+      if (size_code) await query(`DELETE FROM ToppingLocationSizePricing WHERE topping_id = ? AND location_id = ? AND size_code = ?`, [item_id, location_id, size_code]);
+      else await query(`DELETE FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`, [item_id, location_id]);
+    } else {
+      return badRequest(res, 'type query param required (size, crust, or topping)');
+    }
+    return success(res, {}, 'Location pricing removed');
+  } catch (err) { next(err); }
+};
+
+// ── Size-based Crust/Topping Pricing ─────────────────────────────
+const getSizePricing = async (req, res, next) => {
+  try {
+    const lid = req.query.location_id ? parseInt(req.query.location_id) : null;
+    let crustQuery, toppingQuery;
+
+    if (lid) {
+      crustQuery = `
+        SELECT csp.*, clsp.extra_price as location_extra_price, ct.name as crust_name, ct.extra_price as default_extra_price
+        FROM CrustSizePricing csp
+        JOIN CrustTypes ct ON ct.id = csp.crust_id
+        LEFT JOIN CrustLocationSizePricing clsp ON clsp.crust_id = csp.crust_id AND clsp.size_code = csp.size_code AND clsp.location_id = ?
+        ORDER BY ct.name, csp.size_code`;
+      toppingQuery = `
+        SELECT tsp.*, tlsp.price as location_price, t.name as topping_name, t.price as default_price
+        FROM ToppingSizePricing tsp
+        JOIN Toppings t ON t.id = tsp.topping_id
+        LEFT JOIN ToppingLocationSizePricing tlsp ON tlsp.topping_id = tsp.topping_id AND tlsp.size_code = tsp.size_code AND tlsp.location_id = ?
+        ORDER BY t.name, tsp.size_code`;
+    } else {
+      crustQuery = `
+        SELECT csp.*, ct.name as crust_name, ct.extra_price as default_extra_price
+        FROM CrustSizePricing csp
+        JOIN CrustTypes ct ON ct.id = csp.crust_id
+        ORDER BY ct.name, csp.size_code`;
+      toppingQuery = `
+        SELECT tsp.*, t.name as topping_name, t.price as default_price
+        FROM ToppingSizePricing tsp
+        JOIN Toppings t ON t.id = tsp.topping_id
+        ORDER BY t.name, tsp.size_code`;
+    }
+
+    const params = lid ? [lid] : [];
+    const [crustPricing, toppingPricing] = await Promise.all([
+      query(crustQuery, params),
+      query(toppingQuery, params),
+    ]);
+    return success(res, { crusts: crustPricing, toppings: toppingPricing });
+  } catch (err) { next(err); }
+};
+
+const setSizePricing = async (req, res, next) => {
+  try {
+    const { type, item_id, size_code, price, location_id } = req.body;
+    if (!type || !item_id || !size_code || price == null) {
+      return badRequest(res, 'type, item_id, size_code, and price are required');
+    }
+
+    if (location_id) {
+      // Set location-specific price
+      if (type === 'crust') {
+        await query(
+          `INSERT INTO CrustLocationSizePricing (crust_id, location_id, size_code, extra_price) VALUES (?,?,?,?)
+           ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+          [item_id, location_id, size_code, price]
+        );
+      } else if (type === 'topping') {
+        await query(
+          `INSERT INTO ToppingLocationSizePricing (topping_id, location_id, size_code, price) VALUES (?,?,?,?)
+           ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+          [item_id, location_id, size_code, price]
+        );
+      }
+    } else {
+      // Set global baseline price
+      if (type === 'crust') {
+        await query(
+          `INSERT INTO CrustSizePricing (crust_id, size_code, extra_price) VALUES (?,?,?)
+           ON DUPLICATE KEY UPDATE extra_price = VALUES(extra_price)`,
+          [item_id, size_code, price]
+        );
+      } else if (type === 'topping') {
+        await query(
+          `INSERT INTO ToppingSizePricing (topping_id, size_code, price) VALUES (?,?,?)
+           ON DUPLICATE KEY UPDATE price = VALUES(price)`,
+          [item_id, size_code, price]
+        );
+      }
+    }
+
+    return success(res, {}, 'Size pricing saved');
+  } catch (err) { next(err); }
+};
+
+const deleteSizePricing = async (req, res, next) => {
+  try {
+    const { type, location_id } = req.query;
+    const item_id = req.params.itemId; // Using itemId from params for more specific delete if needed, but the user used id
+    const size_code = req.query.size_code;
+
+    if (location_id && size_code) {
+      if (type === 'crust') await query(`DELETE FROM CrustLocationSizePricing WHERE crust_id = ? AND location_id = ? AND size_code = ?`, [req.params.id, location_id, size_code]);
+      else if (type === 'topping') await query(`DELETE FROM ToppingLocationSizePricing WHERE topping_id = ? AND location_id = ? AND size_code = ?`, [req.params.id, location_id, size_code]);
+    } else {
+      if (type === 'crust') await query(`DELETE FROM CrustSizePricing WHERE id = ?`, [req.params.id]);
+      else if (type === 'topping') await query(`DELETE FROM ToppingSizePricing WHERE id = ?`, [req.params.id]);
+    }
+    return success(res, {}, 'Size pricing removed');
+  } catch (err) { next(err); }
+};
+
+// ── Admin Management (Super Admin only) ──────────────────────────
+const getAllAdmins = async (req, res, next) => {
+  try {
+    const rows = await query(
+      `SELECT a.id, a.name, a.email, a.role, a.location_id, a.is_active, a.last_login, 
+              l.name as location_name 
+       FROM Admins a 
+       LEFT JOIN Locations l ON a.location_id = l.id 
+       ORDER BY a.id DESC`
+    );
+    return success(res, rows);
+  } catch (err) { next(err); }
+};
+
+const createAdminAccount = async (req, res, next) => {
+  try {
+    const { name, email, password, role, location_id } = req.body;
+    const hash = await bcrypt.hash(password, 10);
+    const result = await query(
+      `INSERT INTO Admins (name, email, password_hash, role, location_id, is_active) VALUES (?,?,?,?,?,1)`,
+      [name, email, hash, role || 'admin', location_id || null]
+    );
+    return created(res, { id: result.insertId }, 'Admin account created');
+  } catch (err) { next(err); }
+};
+
+const updateAdminAccount = async (req, res, next) => {
+  try {
+    const { name, email, password, role, location_id, is_active } = req.body;
+    let sql = 'UPDATE Admins SET name=?, email=?, role=?, location_id=?, is_active=?';
+    const params = [name, email, role, location_id || null, is_active ? 1 : 0];
+    if (password) {
+      sql += ', password_hash=?';
+      params.push(await bcrypt.hash(password, 10));
+    }
+    sql += ' WHERE id=?';
+    params.push(req.params.id);
+    await query(sql, params);
+    return success(res, {}, 'Admin account updated');
+  } catch (err) { next(err); }
+};
+
+const deleteAdminAccount = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (parseInt(id) === req.admin.id) return badRequest(res, 'Cannot delete yourself');
+    await query(`DELETE FROM Admins WHERE id = ?`, [id]);
+    return success(res, {}, 'Admin account deleted');
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   adminLogin, getDashboard, getReports,
   adminGetOrders, adminGetOrderDetail, updateOrderStatus, updatePaymentStatus, adminPlaceOrder,
@@ -1183,4 +1647,10 @@ module.exports = {
   getAdminNotifications, markAdminNotifRead, markAllAdminNotifsRead,
   sendNotificationToUsers,
   adminGetReviews,
+  adminGetBanners, createBanner, updateBanner, deleteBanner,
+  getLocationGeofence, saveLocationGeofence,
+  getLocationPricing, setLocationPricing, deleteLocationPricing,
+  getSizePricing, setSizePricing, deleteSizePricing,
+  // New Admin CRUD
+  getAllAdmins, createAdminAccount, updateAdminAccount, deleteAdminAccount,
 };
