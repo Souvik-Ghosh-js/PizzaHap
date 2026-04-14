@@ -716,7 +716,7 @@ const getProductAvailabilityMatrix = async (req, res, next) => {
 const adminGetProductSizes = async (req, res, next) => {
   try {
     const lid = req.admin.location_id || (req.query.location_id ? parseInt(req.query.location_id) : null);
-    
+
     // 1. Get sizes
     let rows;
     if (lid) {
@@ -739,7 +739,7 @@ const adminGetProductSizes = async (req, res, next) => {
          LEFT JOIN CrustLocationSizePricing clsp ON clsp.crust_id = csp.crust_id AND clsp.size_code = csp.size_code AND clsp.location_id = ?`,
         [lid]
       ) : query(`SELECT crust_id, size_code, extra_price FROM CrustSizePricing`),
-      
+
       lid ? query(
         `SELECT tsp.topping_id, tsp.size_code, COALESCE(tlsp.price, tsp.price) as price
          FROM ToppingSizePricing tsp
@@ -1031,7 +1031,6 @@ const assignRiderToOrder = async (req, res, next) => {
 
     if (rider_id) {
       const [rider] = await query(`SELECT name, email FROM DeliveryRiders WHERE id = ?`, [rider_id]);
-<<<<<<< HEAD
       const [order] = await query(
         `SELECT o.order_number, o.delivery_address, o.total_amount, o.delivery_type,
                 u.mobile as customer_mobile, u.name as customer_name
@@ -1044,9 +1043,6 @@ const assignRiderToOrder = async (req, res, next) => {
         `SELECT product_name, size_name, quantity, total_price FROM OrderItems WHERE order_id = ?`,
         [orderId]
       );
-=======
-      const [order] = await query(`SELECT order_number, delivery_address FROM Orders WHERE id = ?`, [orderId]);
->>>>>>> 98d07ecc184b6511ffb6237da1bc7015b07a40e5
 
       await query(
         `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
@@ -1309,8 +1305,8 @@ const createBanner = async (req, res, next) => {
       `INSERT INTO Banners (badge_text, title_text, gradient_start, gradient_end, icon_name, sort_order, is_active, valid_from, valid_until)
        VALUES (?,?,?,?,?,?,?,?,?)`,
       [badge_text, title_text, gradient_start || '#991515', gradient_end || '#FF6B35',
-       icon_name || 'local_offer', sort_order || 0, is_active != null ? (is_active ? 1 : 0) : 1,
-       valid_from || null, valid_until || null]
+        icon_name || 'local_offer', sort_order || 0, is_active != null ? (is_active ? 1 : 0) : 1,
+        valid_from || null, valid_until || null]
     );
     return created(res, { banner_id: r.insertId }, 'Banner created');
   } catch (err) { next(err); }
@@ -1332,9 +1328,9 @@ const updateBanner = async (req, res, next) => {
          valid_until    = ?
        WHERE id = ?`,
       [badge_text || null, title_text || null, gradient_start || null, gradient_end || null,
-       icon_name || null, sort_order != null ? sort_order : null,
-       is_active != null ? (is_active ? 1 : 0) : null,
-       valid_from || null, valid_until || null, req.params.id]
+      icon_name || null, sort_order != null ? sort_order : null,
+      is_active != null ? (is_active ? 1 : 0) : null,
+      valid_from || null, valid_until || null, req.params.id]
     );
     return success(res, {}, 'Banner updated');
   } catch (err) { next(err); }
@@ -1462,7 +1458,7 @@ const deleteLocationPricing = async (req, res, next) => {
     const { type, location_id, size_code } = req.query;
     const item_id = req.params.id;
     if (!type || !location_id) return badRequest(res, 'type and location_id query params required');
-    
+
     if (type === 'size') {
       await query(`DELETE FROM ProductLocationPricing WHERE product_size_id = ? AND location_id = ?`, [item_id, location_id]);
     } else if (type === 'crust') {
