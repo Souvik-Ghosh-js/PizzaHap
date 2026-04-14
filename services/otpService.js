@@ -177,19 +177,68 @@ const sendOrderStatusEmail = async (to, orderNumber, status) => {
 };
 
 // ─── RIDER ASSIGNMENT EMAIL ───────────────────────────────────────
-const sendRiderAssignmentEmail = async (riderEmail, riderName, orderNumber, deliveryDetails) => {
+const sendRiderAssignmentEmail = async (
+  riderEmail, riderName, orderNumber, deliveryAddress,
+  customerName, customerMobile, orderItems = [], totalAmount, deliveryType
+) => {
   const subject = `New Order Assigned: #${orderNumber}`;
+
+  const itemsHtml = orderItems.length
+    ? orderItems.map(item => `
+        <tr>
+          <td style="padding:6px 8px;color:#713f12;">${item.product_name}${item.size_name ? ` (${item.size_name})` : ''}</td>
+          <td style="padding:6px 8px;color:#713f12;text-align:center;">x${item.quantity}</td>
+          <td style="padding:6px 8px;color:#713f12;text-align:right;">Rs.${Number(item.total_price).toFixed(2)}</td>
+        </tr>`).join('')
+    : `<tr><td colspan="3" style="padding:6px 8px;color:#9ca3af;">No items info</td></tr>`;
+
   const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 32px; border: 1px solid #e5e7eb; border-radius: 8px;">
-      <h2 style="color: #111827; margin-bottom: 16px;">New Order Assigned</h2>
-      <p style="color: #4b5563; line-height: 1.6;">Hello ${riderName},</p>
-      <p style="color: #4b5563; line-height: 1.6;">A new order has been assigned to you for delivery.</p>
-      <div style="margin: 24px 0; padding: 16px; background: #fefce8; border-radius: 6px; border: 1px solid #fef9c3;">
-        <strong style="color: #854d0e; display: block; margin-bottom: 8px;">Order Details:</strong>
-        <p style="margin: 4px 0; color: #713f12;"><strong>Order:</strong> #${orderNumber}</p>
-        <p style="margin: 4px 0; color: #713f12;"><strong>Address:</strong> ${deliveryDetails}</p>
+    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: auto; padding: 32px; border: 1px solid #e5e7eb; border-radius: 8px;">
+      <h2 style="color: #111827; margin-bottom: 4px;">🍕 New Order Assigned</h2>
+      <p style="color: #6b7280; font-size: 13px; margin-top: 0;">PizzaHap Delivery</p>
+
+      <p style="color: #4b5563; line-height: 1.6;">Hello <strong>${riderName}</strong>,</p>
+      <p style="color: #4b5563; line-height: 1.6;">A new order has been assigned to you. Please check the details below.</p>
+
+      <!-- Order Info -->
+      <div style="margin: 20px 0; padding: 16px; background: #fefce8; border-radius: 6px; border: 1px solid #fef9c3;">
+        <p style="margin: 4px 0; color: #854d0e;"><strong>Order #:</strong> ${orderNumber}</p>
+        <p style="margin: 4px 0; color: #854d0e;"><strong>Type:</strong> ${deliveryType === 'pickup' ? '🏠 Pickup' : '🚴 Delivery'}</p>
+        <p style="margin: 4px 0; color: #854d0e;"><strong>Address:</strong> ${deliveryAddress}</p>
       </div>
-      <p style="color: #4b5563; line-height: 1.6;">Please proceed to the kitchen to pick up the order.</p>
+
+      <!-- Customer Info -->
+      <div style="margin: 20px 0; padding: 16px; background: #eff6ff; border-radius: 6px; border: 1px solid #dbeafe;">
+        <p style="margin: 4px 0 8px; color: #1e40af; font-weight: bold;">👤 Customer Details</p>
+        ${customerName ? `<p style="margin: 4px 0; color: #1d4ed8;"><strong>Name:</strong> ${customerName}</p>` : ''}
+        ${customerMobile ? `<p style="margin: 4px 0; color: #1d4ed8;"><strong>Mobile:</strong> <a href="tel:${customerMobile}" style="color:#1d4ed8;">${customerMobile}</a></p>` : '<p style="margin:4px 0;color:#6b7280;">Mobile not available</p>'}
+      </div>
+
+      <!-- Items -->
+      <div style="margin: 20px 0;">
+        <p style="color: #374151; font-weight: bold; margin-bottom: 8px;">🛒 Order Items</p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <thead>
+            <tr style="background:#f3f4f6;">
+              <th style="padding:6px 8px;text-align:left;color:#6b7280;">Item</th>
+              <th style="padding:6px 8px;text-align:center;color:#6b7280;">Qty</th>
+              <th style="padding:6px 8px;text-align:right;color:#6b7280;">Price</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid #e5e7eb;">
+              <td colspan="2" style="padding:8px;font-weight:bold;color:#111827;">Total</td>
+              <td style="padding:8px;font-weight:bold;color:#111827;text-align:right;">Rs.${Number(totalAmount || 0).toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <p style="color: #4b5563; line-height: 1.6;">Please proceed to the kitchen to pick up the order. Thank you!</p>
+      <p style="color: #9ca3af; font-size: 12px; margin-top: 24px;">— PizzaHap Team</p>
     </div>
   `;
   return await sendEmail(riderEmail, subject, html);

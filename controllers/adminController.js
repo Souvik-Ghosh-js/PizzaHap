@@ -926,17 +926,33 @@ const assignRiderToOrder = async (req, res, next) => {
 
     if (rider_id) {
       const [rider] = await query(`SELECT name, email FROM DeliveryRiders WHERE id = ?`, [rider_id]);
-      const [order] = await query(`SELECT order_number, delivery_address FROM Orders WHERE id = ?`, [orderId]);
-      
+      const [order] = await query(
+        `SELECT o.order_number, o.delivery_address, o.total_amount, o.delivery_type,
+                u.mobile as customer_mobile, u.name as customer_name
+         FROM Orders o
+         LEFT JOIN Users u ON o.user_id = u.id
+         WHERE o.id = ?`,
+        [orderId]
+      );
+      const orderItems = await query(
+        `SELECT product_name, size_name, quantity, total_price FROM OrderItems WHERE order_id = ?`,
+        [orderId]
+      );
+
       await query(
         `INSERT INTO OrderStatusHistory (order_id, status, note, changed_by, changed_by_role)
          SELECT ?, status, CONCAT('Rider assigned: ', ?), ?, 'admin' FROM Orders WHERE id = ?`,
         [orderId, rider.name, req.admin.id, orderId]
       );
 
-      // Send email to rider
+      // Send email to rider with full order details
       if (rider.email) {
-        await sendRiderAssignmentEmail(rider.email, rider.name, order.order_number, order.delivery_address || 'Pickup');
+        await sendRiderAssignmentEmail(
+          rider.email, rider.name, order.order_number,
+          order.delivery_address || 'Pickup',
+          order.customer_name, order.customer_mobile,
+          orderItems, order.total_amount, order.delivery_type
+        );
       }
     }
 
