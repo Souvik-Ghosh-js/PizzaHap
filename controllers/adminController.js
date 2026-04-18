@@ -253,26 +253,24 @@ const adminPlaceOrder = async (req, res, next) => {
       if (item.size_id) {
         // Product has a size - use location-aware pricing
         productResult = await query(
-          `SELECT p.*, COALESCE(plp.price, ps.price) as size_price, ps.size_name,
-                  COALESCE(clp.extra_price, ct.extra_price) as crust_extra, ct.name as crust_name
+          `SELECT p.*, COALESCE(plp.price, ps.price) as size_price, ps.size_name, ps.size_code,
+                  ct.name as crust_name
            FROM Products p
            JOIN ProductSizes ps ON ps.id = ? AND ps.product_id = p.id
            LEFT JOIN ProductLocationPricing plp ON plp.product_size_id = ps.id AND plp.location_id = ?
            LEFT JOIN CrustTypes ct ON ct.id = ?
-           LEFT JOIN CrustLocationPricing clp ON clp.crust_id = ct.id AND clp.location_id = ?
            WHERE p.id = ? AND p.is_available = 1`,
-          [item.size_id, resolvedLocationId, item.crust_id || null, resolvedLocationId, item.product_id]
+          [item.size_id, resolvedLocationId, item.crust_id || null, item.product_id]
         );
       } else {
         // Product doesn't have sizes - use base_price
         productResult = await query(
-          `SELECT p.*, p.base_price as size_price, NULL as size_name,
-                  COALESCE(clp.extra_price, ct.extra_price) as crust_extra, ct.name as crust_name
+          `SELECT p.*, p.base_price as size_price, NULL as size_name, NULL as size_code,
+                  ct.name as crust_name
            FROM Products p
            LEFT JOIN CrustTypes ct ON ct.id = ?
-           LEFT JOIN CrustLocationPricing clp ON clp.crust_id = ct.id AND clp.location_id = ?
            WHERE p.id = ? AND p.is_available = 1`,
-          [item.crust_id || null, resolvedLocationId, item.product_id]
+          [item.crust_id || null, item.product_id]
         );
       }
 
@@ -292,21 +290,20 @@ const adminPlaceOrder = async (req, res, next) => {
         return badRequest(res, `Insufficient stock for ${product.name}. Available: ${product.stock_quantity}`);
       }
 
-      let itemPrice = parseFloat(product.size_price) + parseFloat(product.crust_extra || 0);
-      const itemToppings = [];
+      const sizeCode = product.size_code;
+      let itemPrice = parseFloat(product.size_price);
+      if (item.crust_id) {
+        itemPrice += await resolveCrustPrice(item.crust_id, sizeCode, resolvedLocationId);
+      }
 
+      const itemToppings = [];
       if (item.toppings?.length) {
         for (const tid of item.toppings) {
-          const tr = await query(
-            `SELECT t.*, COALESCE(tlp.price, t.price) as effective_price
-             FROM Toppings t
-             LEFT JOIN ToppingLocationPricing tlp ON tlp.topping_id = t.id AND tlp.location_id = ?
-             WHERE t.id = ? AND t.is_available = 1`,
-            [resolvedLocationId, tid]
-          );
+          const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
           if (tr.length) {
-            itemPrice += parseFloat(tr[0].effective_price);
-            itemToppings.push({ ...tr[0], price: tr[0].effective_price });
+            const resolvedPrice = await resolveToppingPrice(tid, sizeCode, resolvedLocationId);
+            itemPrice += resolvedPrice;
+            itemToppings.push({ ...tr[0], price: resolvedPrice });
           }
         }
       }
