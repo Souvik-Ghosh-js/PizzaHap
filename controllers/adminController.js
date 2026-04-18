@@ -292,8 +292,11 @@ const adminPlaceOrder = async (req, res, next) => {
 
       const sizeCode = product.size_code;
       let itemPrice = parseFloat(product.size_price);
+      console.log('[InHouse] item:', { product_id: item.product_id, size_id: item.size_id, crust_id: item.crust_id, toppings: item.toppings, sizeCode, size_price: product.size_price, locationId: resolvedLocationId });
       if (item.crust_id) {
-        itemPrice += await resolveCrustPrice(item.crust_id, sizeCode, resolvedLocationId);
+        const crustPrice = await resolveCrustPrice(item.crust_id, sizeCode, resolvedLocationId);
+        console.log('[InHouse] resolved crust price:', crustPrice, 'for crust_id=', item.crust_id, 'sizeCode=', sizeCode);
+        itemPrice += crustPrice;
       }
 
       const itemToppings = [];
@@ -302,6 +305,7 @@ const adminPlaceOrder = async (req, res, next) => {
           const tr = await query(`SELECT * FROM Toppings WHERE id = ? AND is_available = 1`, [tid]);
           if (tr.length) {
             const resolvedPrice = await resolveToppingPrice(tid, sizeCode, resolvedLocationId);
+            console.log('[InHouse] resolved topping price:', resolvedPrice, 'for topping_id=', tid, 'sizeCode=', sizeCode);
             itemPrice += resolvedPrice;
             itemToppings.push({ ...tr[0], price: resolvedPrice });
           }
