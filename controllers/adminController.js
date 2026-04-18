@@ -229,6 +229,45 @@ const updatePaymentStatus = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// Precedence (most specific wins): LocationSize > Size > Location > Base
+const resolveCrustPrice = async (crustId, sizeCode, locationId) => {
+  const cr = await query(`SELECT extra_price FROM CrustTypes WHERE id = ? AND is_available = 1`, [crustId]);
+  if (!cr.length) return 0;
+
+  if (locationId && sizeCode) {
+    const lsp = await query(`SELECT extra_price FROM CrustLocationSizePricing WHERE crust_id = ? AND location_id = ? AND LOWER(size_code) = LOWER(?)`, [crustId, locationId, sizeCode]);
+    if (lsp.length) return parseFloat(lsp[0].extra_price);
+  }
+  if (sizeCode) {
+    const sp = await query(`SELECT extra_price FROM CrustSizePricing WHERE crust_id = ? AND LOWER(size_code) = LOWER(?)`, [crustId, sizeCode]);
+    if (sp.length) return parseFloat(sp[0].extra_price);
+  }
+  if (locationId) {
+    const lp = await query(`SELECT extra_price FROM CrustLocationPricing WHERE crust_id = ? AND location_id = ?`, [crustId, locationId]);
+    if (lp.length) return parseFloat(lp[0].extra_price);
+  }
+  return parseFloat(cr[0].extra_price);
+};
+
+const resolveToppingPrice = async (toppingId, sizeCode, locationId) => {
+  const tr = await query(`SELECT price FROM Toppings WHERE id = ? AND is_available = 1`, [toppingId]);
+  if (!tr.length) return 0;
+
+  if (locationId && sizeCode) {
+    const lsp = await query(`SELECT price FROM ToppingLocationSizePricing WHERE topping_id = ? AND location_id = ? AND LOWER(size_code) = LOWER(?)`, [toppingId, locationId, sizeCode]);
+    if (lsp.length) return parseFloat(lsp[0].price);
+  }
+  if (sizeCode) {
+    const sp = await query(`SELECT price FROM ToppingSizePricing WHERE topping_id = ? AND LOWER(size_code) = LOWER(?)`, [toppingId, sizeCode]);
+    if (sp.length) return parseFloat(sp[0].price);
+  }
+  if (locationId) {
+    const lp = await query(`SELECT price FROM ToppingLocationPricing WHERE topping_id = ? AND location_id = ?`, [toppingId, locationId]);
+    if (lp.length) return parseFloat(lp[0].price);
+  }
+  return parseFloat(tr[0].price);
+};
+
 // ── In-house / admin billing ──────────────────────────────────────
 const adminPlaceOrder = async (req, res, next) => {
   try {
